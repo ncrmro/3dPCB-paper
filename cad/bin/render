@@ -1,0 +1,44 @@
+#!/usr/bin/env -S uv run python
+"""Render spike vitamins to .scad files."""
+
+import sys
+import importlib
+import pkgutil
+from pathlib import Path
+from unittest.mock import MagicMock
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
+sys.path.insert(0, str(REPO_ROOT / "src"))
+
+sys.modules["OpenGL"] = MagicMock()
+sys.modules["OpenGL.GL"] = MagicMock()
+
+import anchorscad as ad
+import registry
+import vitamins
+
+
+def _walk(package):
+    for _, name, _ in pkgutil.walk_packages(list(package.__path__), package.__name__ + "."):
+        yield importlib.import_module(name)
+
+
+def main():
+    out = REPO_ROOT / "build"
+    out.mkdir(exist_ok=True)
+
+    for mod in _walk(vitamins):
+        registry.auto_register_module(mod, part_type="vitamin")
+
+    for name, (factory, _ptype, fmt) in registry.get_registry().items():
+        shape = factory()
+        if fmt != "anchorscad":
+            continue
+        scad = ad.render(shape).rendered_shape.code.code
+        path = out / f"{name}.scad"
+        path.write_text(scad)
+        print(f"wrote {path}")
+
+
+if __name__ == "__main__":
+    main()
