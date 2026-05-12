@@ -5,13 +5,15 @@
   "version": "0.0.0",
   "scripts": {
     "dev": "astro dev",
+    "prebuild": "bash bin/prebuild-cad",
     "build": "astro build",
     "preview": "astro preview",
     "check": "astro check"
   },
   "dependencies": {
     "@google/model-viewer": "latest",
-    "astro": "latest"
+    "astro": "latest",
+    "yaml": "latest"
   },
   "devDependencies": {
     "@astrojs/check": "latest",

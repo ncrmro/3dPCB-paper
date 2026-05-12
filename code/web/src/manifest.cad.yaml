@@ -1,0 +1,37 @@
+# Gallery manifest for AnchorSCAD outputs.
+#
+# Shape mirrors ~/repos/ncrmro/cadeng/example/cadeng.yaml: a top-level
+# `project` tag, a `models` list (each with a name + glb URL + default
+# camera key), and a shared `cameras` table for <model-viewer>'s
+# camera-orbit attribute.
+#
+# Model names match the snake_cased class names auto-registered in
+# code/cad/src/registry.py via auto_register_module() over the
+# code/cad/src/vitamins/ package — keep this in sync if classes are
+# renamed there.
+
+project: cad
+
+cameras:
+  # camera-orbit format used by <model-viewer>: "theta phi radius".
+  # The string here matches that attribute exactly when split on spaces.
+  iso: "55deg 75deg 200mm"
+  front: "0deg 90deg 200mm"
+  top: "0deg 0deg 200mm"
+
+models:
+  - name: scd41_breakout
+    glb: /models/cad/scd41_breakout.glb
+    camera: iso
+  - name: bh1750_breakout
+    glb: /models/cad/bh1750_breakout.glb
+    camera: iso
+  - name: esp32_c3_supermini
+    glb: /models/cad/esp32_c3_supermini.glb
+    camera: iso
+  - name: esp32_c3_carrier
+    glb: /models/cad/esp32_c3_carrier.glb
+    camera: iso
+  - name: esp32_c3_assembly
+    glb: /models/cad/esp32_c3_assembly.glb
+    camera: iso

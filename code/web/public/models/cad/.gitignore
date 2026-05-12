@@ -1,0 +1,6 @@
+# GLBs land here from `bin/prebuild-cad` (which runs `code/cad/bin/render`
+# and copies the build artifacts in). The artifacts are generated, not
+# source — keep the directory in git so Astro's static copy succeeds on a
+# fresh clone, but ignore everything in it.
+*
+!.gitignore
