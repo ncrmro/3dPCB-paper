@@ -111,22 +111,24 @@ J3_X = ORIGIN_X + 60.0
 HEADERS_Y = ORIGIN_Y + 8.0
 
 PLACEMENTS = [
-    # ref, anchorscad GLB name, kicad x_mm, kicad y_mm (pad-1),
-    # pin_count, yaw_deg (around module Z before orient).
+    # ref, GLB name, kicad x_mm (pin1), kicad y_mm (pin1), pin_count,
+    # yaw_deg (around vitamin Z), pin_row_local_y_mm.
     #
-    # Use the bare Supermini, not esp32_c3_assembly — the assembly
-    # version includes the carrier board, and the KiCad PCB itself
-    # IS that carrier here. Showing both would stack two boards.
+    # `pin_row_local_y_mm` is the Y coord of the pin-row centroid in
+    # the *vitamin's* local frame (in mm). The vitamin's origin is at
+    # the PCB centre but the through-hole header lives along an edge.
+    # For SCD41 / BH1750 the header is on -Y (header_y = -depth/2 +
+    # header_body_width/2 in sensors.py). Without compensating for
+    # that offset, the vitamin lands ~9mm west of the KiCad header
+    # because the assembler placed the vitamin *centre* at the KiCad
+    # pin-row centre instead of the *pin row* at it.
     #
-    # Sensors are authored with the pin row along the vitamin's +Y.
-    # gen_spike_pcb.py now rotates the J2/J3 footprints to 270° so
-    # their through-hole pads run east; the vitamin needs a -90° yaw
-    # so its pin-row axis lines up with KiCad +X.
-    # The Supermini is symmetric across its two-row header block, so
-    # its yaw stays at 0.
-    ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9, 0.0),
-    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4, -90.0),
-    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5, -90.0),
+    # Sensors yaw -90° so their +Y pin axis aligns with KiCad +X after
+    # the 270° KiCad footprint rotation. Supermini is symmetric
+    # across its two-row header block; yaw 0, offset 0.
+    ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9,  0.0,  0.0),
+    ("SCD41", "scd41_breakout",      J2_X,                HEADERS_Y, 4, -90.0, -9.605),
+    ("BH1750", "bh1750_breakout",    J3_X,                HEADERS_Y, 5, -90.0, -7.980),
 ]
 
 
@@ -182,27 +184,39 @@ def main() -> int:
     orient = anchorscad_orient()
     scale = scale_matrix(MM_TO_M)
 
-    for ref, name, fx, fy, pin_count, yaw_deg in PLACEMENTS:
+    for ref, name, fx, fy, pin_count, yaw_deg, pin_row_local_y in PLACEMENTS:
         glb_path = cad_build_dir / f"{name}.glb"
         if not glb_path.exists():
             print(f"  skip {ref} ({name}): {glb_path} not found")
             continue
         vitamin = _load_scene(glb_path)
-        # Compute the centroid of the rotated KiCad pin row in world
-        # coords. KiCad footprint angle equals the vitamin yaw (both
-        # are CCW rotations around the local up-axis; the orient
-        # transform maps AnchorSCAD +Z to glTF +Y which is the same
-        # axis as KiCad +Z post-axis-swap). The pad column runs from
-        # local (0, 0) (pin 1) to local (0, span); after a CCW rot θ
-        # this becomes world (-span·sinθ, +span·cosθ).
+
+        # Step 1: compute target — the centroid of the rotated KiCad
+        # pin row in world coords. KiCad footprint angle equals the
+        # vitamin yaw (both CCW around the local up-axis; the orient
+        # transform identifies AnchorSCAD +Z with KiCad +Z = glTF +Y).
+        # Pad column local goes pin1 (0,0) → pinN (0, span); after a
+        # CCW rot θ this becomes world (-span·sinθ, +span·cosθ).
         half_span = ((pin_count - 1) * PITCH) / 2.0
-        theta_kicad = np.radians(yaw_deg)
-        cx_kicad = fx - half_span * np.sin(theta_kicad)
-        cy_kicad = fy + half_span * np.cos(theta_kicad)
-        translation = kicad_to_glb(cx_kicad, cy_kicad)
-        # Compose: yaw (module frame) → scale (mm → m) → orient (Z-up
-        # to Y-up) → translate (to footprint position). Matrix order
-        # is the reverse of application order with @.
+        theta = np.radians(yaw_deg)
+        target_cx_mm = fx - half_span * np.sin(theta)
+        target_cy_mm = fy + half_span * np.cos(theta)
+
+        # Step 2: compensate for pin-row offset in vitamin's frame.
+        # The vitamin origin is at PCB centre; the pin-row centroid
+        # is at local (0, pin_row_local_y, 0). After yaw + orient
+        # this offset shows up in glTF as (-sinθ·py, 0, -cosθ·py).
+        # Subtract that from the translation so the *pin row*, not
+        # the vitamin centre, ends up at the KiCad target.
+        glb_off_x_mm = -np.sin(theta) * pin_row_local_y
+        glb_off_z_mm = -np.cos(theta) * pin_row_local_y
+        adjusted_cx_mm = target_cx_mm - glb_off_x_mm
+        adjusted_cy_mm = target_cy_mm - glb_off_z_mm
+        translation = kicad_to_glb(adjusted_cx_mm, adjusted_cy_mm)
+
+        # Step 3: compose transform. Order with @: yaw applies first
+        # (vitamin frame), then scale (mm → m), then orient (Z→Y),
+        # then translate (target placement in glTF metres).
         node_transform = (
             translate_matrix(translation) @ orient @ scale @ yaw_matrix(yaw_deg)
         )
