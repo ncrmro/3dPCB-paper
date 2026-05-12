@@ -1,7 +1,13 @@
 #!/usr/bin/env -S uv run --script
 # /// script
 # requires-python = ">=3.13"
-# dependencies = ["trimesh>=4.0", "numpy>=2.0", "lxml>=5.0", "networkx>=3.0"]
+# dependencies = [
+#   "trimesh>=4.0",
+#   "numpy>=2.0",
+#   "lxml>=5.0",
+#   "networkx>=3.0",
+#   "scipy>=1.11",
+# ]
 # ///
 """Merge code/kicad/build/spike.glb with the AnchorSCAD vitamin GLBs.
 
@@ -142,6 +148,83 @@ def _load_scene(path: Path) -> trimesh.Scene:
     return s
 
 
+def _axis_cylinder(direction: str, length_m: float, color_rgba: tuple) -> trimesh.Trimesh:
+    """Coloured cylinder along ±X / ±Y / ±Z for an axis marker."""
+    radius = length_m * 0.008  # thin but visible
+    cyl = trimesh.creation.cylinder(radius=radius, height=length_m, sections=12)
+    # Cylinder defaults to +Z; rotate to the requested axis, then
+    # translate so it grows from the origin (not centred at origin).
+    rotations = {
+        "x": trimesh.transformations.rotation_matrix(np.pi / 2.0, [0.0, 1.0, 0.0]),
+        "y": trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0]),
+        "z": np.eye(4),
+    }
+    axis_unit = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}[direction]
+    cyl.apply_transform(rotations[direction])
+    cyl.apply_translation(np.array(axis_unit) * (length_m / 2.0))
+    cyl.visual.face_colors = np.tile(np.array(color_rgba, dtype=np.uint8), (len(cyl.faces), 1))
+    return cyl
+
+
+def _ground_grid(extent_m: float, divisions: int = 20) -> trimesh.Trimesh:
+    """Flat checkered plane at glTF y=0 — alternating light/dark squares."""
+    verts: list[tuple] = []
+    faces: list[tuple] = []
+    colors: list[tuple] = []
+    step = (2 * extent_m) / divisions
+    light = (220, 220, 220, 255)
+    dark = (180, 180, 190, 255)
+    for ix in range(divisions):
+        for iz in range(divisions):
+            x0 = -extent_m + ix * step
+            z0 = -extent_m + iz * step
+            x1 = x0 + step
+            z1 = z0 + step
+            base = len(verts)
+            verts.extend(
+                [
+                    (x0, 0.0, z0),
+                    (x1, 0.0, z0),
+                    (x1, 0.0, z1),
+                    (x0, 0.0, z1),
+                ]
+            )
+            faces.extend([(base, base + 1, base + 2), (base, base + 2, base + 3)])
+            c = light if (ix + iz) % 2 == 0 else dark
+            colors.extend([c, c])
+    return trimesh.Trimesh(
+        vertices=np.array(verts, dtype=np.float32),
+        faces=np.array(faces, dtype=np.int32),
+        face_colors=np.array(colors, dtype=np.uint8),
+        process=False,
+    )
+
+
+def add_axes_and_grid(scene: trimesh.Scene, axis_len_m: float) -> None:
+    """Attach an XYZ axis triad at origin and a checkered ground grid.
+
+    Colours follow the SketchUp / glTF convention: X = red, Y = green,
+    Z = blue. The grid sits at y=0 (the plane the PCB rests on after
+    `HEADER_HEIGHT_M`) and extends `axis_len_m` in each X/Z direction.
+    """
+    scene.add_geometry(
+        _axis_cylinder("x", axis_len_m, (220, 60, 60, 255)),
+        node_name="axis_x",
+    )
+    scene.add_geometry(
+        _axis_cylinder("y", axis_len_m, (60, 200, 60, 255)),
+        node_name="axis_y",
+    )
+    scene.add_geometry(
+        _axis_cylinder("z", axis_len_m, (60, 90, 220, 255)),
+        node_name="axis_z",
+    )
+    scene.add_geometry(
+        _ground_grid(extent_m=axis_len_m, divisions=20),
+        node_name="ground_grid",
+    )
+
+
 def main() -> int:
     here = Path(__file__).resolve().parent
     kicad_dir = here.parent
@@ -163,6 +246,26 @@ def main() -> int:
         default=str(kicad_dir / "build" / "spike-assembly.glb"),
         help="merged GLB (default: build/spike-assembly.glb — keeps "
         "the bare spike.glb intact so consumers can show both views)",
+    )
+    parser.add_argument(
+        "--axes",
+        dest="axes",
+        action="store_true",
+        default=True,
+        help="bake an XYZ axis triad + ground grid into the output "
+        "(default; pass --no-axes to disable)",
+    )
+    parser.add_argument(
+        "--no-axes",
+        dest="axes",
+        action="store_false",
+    )
+    parser.add_argument(
+        "--axes-extent-m",
+        type=float,
+        default=0.12,
+        help="axis length and grid half-extent in metres (default: "
+        "0.12, ~12cm, matches the spike PCB scale)",
     )
     args = parser.parse_args()
 
@@ -227,6 +330,10 @@ def main() -> int:
                 transform=node_transform,
             )
         print(f"  placed {ref} ({name}) yaw={yaw_deg}° at glb {translation.tolist()}")
+
+    if args.axes:
+        add_axes_and_grid(scene, axis_len_m=args.axes_extent_m)
+        print(f"  added XYZ axes + ground grid (extent {args.axes_extent_m}m)")
 
     scene.export(str(out_path))
     print(f"wrote {out_path} ({out_path.stat().st_size:,} bytes)")
