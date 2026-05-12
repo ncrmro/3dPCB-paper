@@ -8,6 +8,14 @@ dependencies = [
     "anchorscad-core>=0.2.4",
     "numpy>=2.3.5",
     "pythonopenscad>=2.2.19",
+    # 3MF → GLB conversion that preserves OpenSCAD's per-face colors.
+    # assimp's GLB writer flattens 3MF basematerials to a single
+    # material; trimesh reads the per-triangle pid refs into
+    # ColorVisuals and writes a GLB <model-viewer> renders correctly.
+    "trimesh>=4.0",
+    "networkx>=3.0",
+    "lxml>=5.0",
+    "manifold3d>=3.0",
 ]
 
 [build-system]

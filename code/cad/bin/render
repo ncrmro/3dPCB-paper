@@ -1,18 +1,24 @@
 #!/usr/bin/env -S uv run python
-"""Render registered AnchorSCAD parts to .scad, .stl, and .glb.
+"""Render registered AnchorSCAD parts to .scad, .stl, .3mf, and .glb.
 
 Pipeline per part:
-    factory() -> ad.Shape -> .scad (anchorscad)
-    .scad -> .stl (openscad -o out.stl in.scad)
-    .stl -> .glb (assimp export in.stl out.glb)
+    factory() -> ad.Shape  -> .scad (anchorscad)
+    .scad                  -> .stl  (openscad — for slicers / downloads)
+    .scad                  -> .3mf  (openscad — color-aware intermediate)
+    .3mf                   -> .glb  (trimesh — preserves OpenSCAD colors)
 
 Emits build/manifest.json listing each part with relative paths to its
-.scad/.stl/.glb so downstream consumers (the Astro gallery) can wire up
-cards without re-scanning the build dir.
+.scad/.stl/.3mf/.glb so downstream consumers (the Astro gallery) can
+wire up cards without re-scanning the build dir.
 
-Backward compatible: callers that only need .scad still get them. STL/GLB
-steps are best-effort — a failure in one part does not abort the whole
-run, the manifest just omits the missing path.
+The GLB used to be produced via `assimp export <stl> <glb>`, but STL
+doesn't carry color; the resulting GLBs rendered as untextured meshes
+in <model-viewer>. 3MF preserves OpenSCAD's color() calls as per-
+triangle material refs, and trimesh's GLB writer encodes them as
+ColorVisuals on the mesh — which model-viewer renders as expected.
+
+Each step is best-effort — a failure in one part does not abort the
+whole run, the manifest just omits the missing path.
 """
 
 import json
@@ -53,6 +59,22 @@ def _run(cmd: list[str]) -> bool:
         return False
 
 
+def _convert_3mf_to_glb(src: Path, dst: Path) -> bool:
+    """Use trimesh so per-face colors carry into the GLB."""
+    try:
+        import trimesh  # type: ignore
+    except ImportError:
+        print("  ! trimesh not installed — skipping GLB", file=sys.stderr)
+        return False
+    try:
+        scene = trimesh.load(str(src))
+        scene.export(str(dst))
+        return True
+    except Exception as exc:  # noqa: BLE001 — best-effort
+        print(f"  ! trimesh 3mf→glb failed: {exc}", file=sys.stderr)
+        return False
+
+
 def main() -> int:
     out = REPO_ROOT / "build"
     out.mkdir(exist_ok=True)
@@ -61,11 +83,8 @@ def main() -> int:
         registry.auto_register_module(mod, part_type="vitamin")
 
     have_openscad = shutil.which("openscad") is not None
-    have_assimp = shutil.which("assimp") is not None
     if not have_openscad:
-        print("note: 'openscad' not on PATH — skipping STL/GLB steps", file=sys.stderr)
-    if not have_assimp:
-        print("note: 'assimp' not on PATH — skipping GLB step", file=sys.stderr)
+        print("note: 'openscad' not on PATH — skipping STL/3MF/GLB steps", file=sys.stderr)
 
     manifest_models: list[dict] = []
     for name, (factory, ptype, fmt) in registry.get_registry().items():
@@ -87,15 +106,21 @@ def main() -> int:
             "scad": scad_path.relative_to(out).as_posix(),
         }
 
-        stl_path = out / f"{name}.stl"
-        if have_openscad and _run(["openscad", "-o", str(stl_path), str(scad_path)]):
-            print(f"wrote {stl_path}")
-            entry["stl"] = stl_path.relative_to(out).as_posix()
+        if have_openscad:
+            stl_path = out / f"{name}.stl"
+            if _run(["openscad", "-o", str(stl_path), str(scad_path)]):
+                print(f"wrote {stl_path}")
+                entry["stl"] = stl_path.relative_to(out).as_posix()
 
-            glb_path = out / f"{name}.glb"
-            if have_assimp and _run(["assimp", "export", str(stl_path), str(glb_path)]):
-                print(f"wrote {glb_path}")
-                entry["glb"] = glb_path.relative_to(out).as_posix()
+            tmf_path = out / f"{name}.3mf"
+            if _run(["openscad", "-o", str(tmf_path), str(scad_path)]):
+                print(f"wrote {tmf_path}")
+                entry["3mf"] = tmf_path.relative_to(out).as_posix()
+
+                glb_path = out / f"{name}.glb"
+                if _convert_3mf_to_glb(tmf_path, glb_path):
+                    print(f"wrote {glb_path}")
+                    entry["glb"] = glb_path.relative_to(out).as_posix()
 
         manifest_models.append(entry)
 
