@@ -188,17 +188,17 @@ def main() -> int:
             print(f"  skip {ref} ({name}): {glb_path} not found")
             continue
         vitamin = _load_scene(glb_path)
-        # Compute the centroid of the header pin row in KiCad world
-        # coords. yaw_deg encodes the *vitamin's* rotation, which
-        # equals (negative of) the KiCad footprint rotation: the
-        # vitamin's +Y pin-row axis points in the same world
-        # direction as the KiCad footprint's +Y (local) axis.
-        # So the centroid offset goes from pin 1 along that axis by
-        # (pin_count-1)/2 * PITCH.
+        # Compute the centroid of the rotated KiCad pin row in world
+        # coords. KiCad footprint angle equals the vitamin yaw (both
+        # are CCW rotations around the local up-axis; the orient
+        # transform maps AnchorSCAD +Z to glTF +Y which is the same
+        # axis as KiCad +Z post-axis-swap). The pad column runs from
+        # local (0, 0) (pin 1) to local (0, span); after a CCW rot θ
+        # this becomes world (-span·sinθ, +span·cosθ).
         half_span = ((pin_count - 1) * PITCH) / 2.0
-        offset_dir_rad = np.radians(-yaw_deg)  # KiCad footprint angle
-        cx_kicad = fx - half_span * np.sin(offset_dir_rad)
-        cy_kicad = fy + half_span * np.cos(offset_dir_rad)
+        theta_kicad = np.radians(yaw_deg)
+        cx_kicad = fx - half_span * np.sin(theta_kicad)
+        cy_kicad = fy + half_span * np.cos(theta_kicad)
         translation = kicad_to_glb(cx_kicad, cy_kicad)
         # Compose: yaw (module frame) → scale (mm → m) → orient (Z-up
         # to Y-up) → translate (to footprint position). Matrix order
