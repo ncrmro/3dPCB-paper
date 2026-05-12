@@ -263,3 +263,37 @@ body {
   text-decoration: none;
 }
 .embodiment-list li a:hover { border-color: var(--accent); }
+
+/* Focus-route slot + linked cards.
+ * Cards on the index and the focus-route gallery strip are wrapped in
+ * <a class="screenshot-card-link">. The link is the click target; the
+ * inner <model-viewer> still handles rotate/zoom because pointerdown
+ * on a model-viewer doesn't propagate as a click. */
+.focus-slot {
+  display: grid;
+  grid-template-columns: 1fr min(360px, 30%);
+  gap: 1.5rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+  margin-bottom: 2rem;
+}
+@media (max-width: 900px) { .focus-slot { grid-template-columns: 1fr; } }
+.focus-pane { display: flex; align-items: stretch; }
+.focus-pane model-viewer { flex: 1; }
+.focus-thumb { display: flex; flex-direction: column; gap: 0.5rem; }
+.focus-thumb h3 { font-size: 0.9rem; color: var(--text-muted); }
+.focus-thumb img { width: 100%; border-radius: var(--radius); border: 1px solid var(--border); }
+
+.screenshot-card-link {
+  display: block;
+  text-decoration: none;
+  color: inherit;
+  border-radius: var(--radius);
+  transition: outline 0.15s;
+  outline: 2px solid transparent;
+  outline-offset: 2px;
+}
+.screenshot-card-link:hover { outline-color: var(--accent); }
+.screenshot-card-link.is-focused { outline-color: var(--accent-hover); }

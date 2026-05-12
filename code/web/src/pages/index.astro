@@ -96,21 +96,23 @@ const placements: Placement[] = Object.values(placementYamls).map(
             </div>
             <div class="screenshot-grid">
               {cardModels.map((m) => (
-                <article class="screenshot-card">
-                  <model-viewer
-                    src={m.glb}
-                    camera-controls
-                    auto-rotate
-                    camera-orbit={m.cameraOrbit}
-                    shadow-intensity="1"
-                    exposure="0.9"
-                    alt={m.name}
-                  />
-                  <div class="card-footer">
-                    <span class="angle-label">{cad.project}</span>
-                    <span>{m.name}</span>
-                  </div>
-                </article>
+                <a class="screenshot-card-link" href={`/model/cad/${m.name}/`}>
+                  <article class="screenshot-card">
+                    <model-viewer
+                      src={m.glb}
+                      camera-controls
+                      auto-rotate
+                      camera-orbit={m.cameraOrbit}
+                      shadow-intensity="1"
+                      exposure="0.9"
+                      alt={m.name}
+                    />
+                    <div class="card-footer">
+                      <span class="angle-label">{cad.project}</span>
+                      <span>{m.name}</span>
+                    </div>
+                  </article>
+                </a>
               ))}
             </div>
           </section>
@@ -158,19 +160,21 @@ const placements: Placement[] = Object.values(placementYamls).map(
           ) : (
             <div class="screenshot-grid">
               {kicadModels.map((m) => (
-                <article class="screenshot-card">
-                  <model-viewer
-                    src={`/models/kicad/${m.name}.glb`}
-                    alt={m.label ?? m.name}
-                    camera-controls
-                    auto-rotate
-                    style="width: 100%; height: 320px;"
-                  />
-                  <div class="card-footer">
-                    <span class="angle-label">kicad</span>
-                    <span>{m.label ?? m.name}</span>
-                  </div>
-                </article>
+                <a class="screenshot-card-link" href={`/model/kicad/${m.name}/`}>
+                  <article class="screenshot-card">
+                    <model-viewer
+                      src={`/models/kicad/${m.name}.glb`}
+                      alt={m.label ?? m.name}
+                      camera-controls
+                      auto-rotate
+                      style="width: 100%; height: 320px;"
+                    />
+                    <div class="card-footer">
+                      <span class="angle-label">kicad</span>
+                      <span>{m.label ?? m.name}</span>
+                    </div>
+                  </article>
+                </a>
               ))}
             </div>
           )
