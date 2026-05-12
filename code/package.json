@@ -1,0 +1,5 @@
+{
+  "name": "3dpcb-paper",
+  "private": true,
+  "workspaces": ["web"]
+}
