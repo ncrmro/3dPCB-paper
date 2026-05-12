@@ -3,13 +3,19 @@
 // renders one <model-viewer> card per registered AnchorSCAD part / KiCad
 // board.
 //
-// Vite's `?raw` query inlines the YAML at build time, which keeps Astro
-// happy under both dev (HMR) and SSG (no need to copy files into the
-// prerender chunk dir).
-import { readFileSync } from "node:fs";
-import { fileURLToPath } from "node:url";
+// Vite's `?raw` query inlines the YAML at build time, which keeps
+// Astro happy under both dev (HMR) and SSG (no need to copy files
+// into the prerender chunk dir). For directory enumeration we use
+// `import.meta.glob({ query: '?raw' })` which gives us a synchronous
+// (eager) record of every YAML inlined as a string.
 import { parse as parseYaml } from "yaml";
-import manifestYaml from "../manifest.cad.yaml?raw";
+import cadManifestYaml from "../manifest.cad.yaml?raw";
+import kicadManifestYaml from "../manifest.kicad.yaml?raw";
+
+const placementYamls = import.meta.glob<string>(
+  "../../../kicad/placements/*.yaml",
+  { query: "?raw", import: "default", eager: true },
+);
 
 interface CadModel {
   name: string;
@@ -23,7 +29,7 @@ interface CadManifest {
   models: CadModel[];
 }
 
-const cad = parseYaml(manifestYaml) as CadManifest;
+const cad = parseYaml(cadManifestYaml) as CadManifest;
 const cameras = cad.cameras ?? {};
 const cardModels = cad.models.map((m) => ({
   ...m,
@@ -39,13 +45,20 @@ type KicadManifest = {
   models: KicadModel[];
   cameras?: Record<string, string>;
 };
-const kicadManifestPath = fileURLToPath(
-  new URL("../manifest.kicad.yaml", import.meta.url),
-);
-const kicadManifest = parseYaml(
-  readFileSync(kicadManifestPath, "utf8"),
-) as KicadManifest;
+const kicadManifest = parseYaml(kicadManifestYaml) as KicadManifest;
 const kicadModels: KicadModel[] = kicadManifest.models ?? [];
+
+// Embodiment pairs — substrate variants pairing a substrate GLB with a
+// KiCad PCB. Each YAML under code/kicad/placements/ becomes one entry.
+interface Placement {
+  id: string;
+  label?: string;
+  pcb: string;
+  substrate: { glb: string; camera?: string };
+}
+const placements: Placement[] = Object.values(placementYamls).map(
+  (raw) => parseYaml(raw) as Placement,
+);
 ---
 
 <!doctype html>
@@ -103,6 +116,34 @@ const kicadModels: KicadModel[] = kicadManifest.models ?? [];
           </section>
         )
       }
+
+      <!-- Embodiment pairs section -->
+      <section class="model-group embodiment">
+        <div class="model-group-header">
+          <h2>Embodiment pairs</h2>
+        </div>
+        {
+          placements.length === 0 ? (
+            <p class="empty-state-inline">
+              no placements yet &mdash; see <code>code/kicad/placements/</code>
+            </p>
+          ) : (
+            <ul class="embodiment-list">
+              {placements.map((p) => (
+                <li>
+                  <a href={`/embodiment/${p.id}/`}>
+                    <strong>{p.label ?? p.id}</strong>
+                    <span class="muted">
+                      {p.pcb} ⇄ {p.substrate.glb}
+                    </span>
+                  </a>
+                </li>
+              ))}
+            </ul>
+          )
+        }
+      </section>
+      <!-- /Embodiment pairs section -->
 
       <!-- KiCad gallery section -->
       <section class="model-group gallery kicad">

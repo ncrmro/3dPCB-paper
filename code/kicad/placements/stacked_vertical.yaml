@@ -1,0 +1,10 @@
+id: stacked_vertical
+label: "Stacked vertical"
+pcb: spike.kicad_pcb
+substrate:
+  glb: scd41_breakout.glb
+  camera: iso
+parts:
+  U1: { x: 0,  y: 0,  z: 0, rotation: [0, 0, 0], pinned: true }
+  U2: { x: 0,  y: 20, z: 0, rotation: [0, 0, 0], pinned: false }
+  U3: { x: 20, y: 0,  z: 0, rotation: [0, 0, 0], pinned: false }

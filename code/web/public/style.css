@@ -197,3 +197,69 @@ body {
   cursor: pointer;
   line-height: 1;
 }
+
+/* Embodiment-pair view styles (PR G). Two side-by-side <model-viewer>
+ * panes plus a placement-metadata block. The gallery index also gets a
+ * compact list of embodiment links between the AnchorSCAD and KiCad
+ * sections. */
+.back-link {
+  color: var(--text-muted);
+  text-decoration: none;
+  font-size: 0.9rem;
+}
+.back-link:hover { color: var(--accent-hover); }
+
+.embodiment-pair {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 1.5rem;
+  margin-bottom: 2rem;
+}
+@media (max-width: 900px) {
+  .embodiment-pair { grid-template-columns: 1fr; }
+}
+.embodiment-pane {
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  padding: 1rem;
+}
+.pane-header { display: flex; justify-content: space-between; align-items: baseline; margin-bottom: 0.5rem; }
+.pane-header h2 { font-size: 1.05rem; }
+.muted { color: var(--text-muted); font-size: 0.85rem; }
+
+.pcb-placeholder {
+  background: var(--bg);
+  border: 1px dashed var(--border);
+  border-radius: var(--radius);
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  text-align: center;
+  padding: 1rem;
+  gap: 0.5rem;
+}
+
+.embodiment-meta { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius); padding: 1rem; }
+.embodiment-meta h3 { font-size: 1rem; margin: 0.75rem 0 0.4rem; }
+.embodiment-meta h3:first-child { margin-top: 0; }
+.meta-grid { display: grid; grid-template-columns: max-content 1fr; gap: 0.25rem 1rem; font-size: 0.9rem; }
+.meta-grid dt { color: var(--text-muted); }
+.parts-table { width: 100%; border-collapse: collapse; font-size: 0.85rem; }
+.parts-table th, .parts-table td { padding: 0.35rem 0.6rem; border-bottom: 1px solid var(--border); text-align: left; }
+.parts-table th { color: var(--text-muted); font-weight: normal; }
+
+.embodiment-list { list-style: none; display: grid; gap: 0.5rem; }
+.embodiment-list li a {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.75rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+}
+.embodiment-list li a:hover { border-color: var(--accent); }

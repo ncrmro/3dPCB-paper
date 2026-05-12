@@ -1,0 +1,209 @@
+---
+import { parse as parseYaml } from "yaml";
+import cadManifestYaml from "../../manifest.cad.yaml?raw";
+
+interface Placement {
+  id: string;
+  label?: string;
+  pcb: string;
+  substrate: { glb: string; camera?: string };
+  parts?: Record<
+    string,
+    { x: number; y: number; z: number; rotation?: number[]; pinned?: boolean }
+  >;
+}
+
+interface CadManifest {
+  cameras?: Record<string, string>;
+}
+
+// Eager glob: every placement YAML is inlined at build time, keyed by
+// its source path. Object.values() gives us the raw strings; we don't
+// need the keys.
+const placementYamls = import.meta.glob<string>(
+  "../../../../kicad/placements/*.yaml",
+  { query: "?raw", import: "default", eager: true },
+);
+
+// PCB GLB presence — also build-time. import.meta.glob over public/
+// gives us the set of GLBs the prebuild step staged; the basenames
+// match the kicad project filename without the .kicad_pcb suffix.
+const kicadGlbs = import.meta.glob(
+  "../../../public/models/kicad/*.glb",
+  { eager: true },
+);
+const presentPcbBasenames = new Set(
+  Object.keys(kicadGlbs).map(
+    (p) => p.split("/").pop()!.replace(/\.glb$/, ""),
+  ),
+);
+
+export function getStaticPaths() {
+  const yamls = import.meta.glob<string>(
+    "../../../../kicad/placements/*.yaml",
+    { query: "?raw", import: "default", eager: true },
+  );
+  return Object.values(yamls).map((raw) => {
+    const placement = parseYaml(raw) as Placement;
+    return { params: { id: placement.id }, props: { placement } };
+  });
+}
+
+const { placement } = Astro.props as { placement: Placement };
+const cad = parseYaml(cadManifestYaml) as CadManifest;
+const cameras = cad.cameras ?? {};
+const cameraKey = placement.substrate.camera ?? "iso";
+const cameraOrbit = cameras[cameraKey] ?? cameras.iso ?? "55deg 75deg 200mm";
+
+const pcbBasename = placement.pcb.replace(/\.kicad_pcb$/, "");
+const pcbGlb = `/models/kicad/${pcbBasename}.glb`;
+const pcbGlbExists = presentPcbBasenames.has(pcbBasename);
+const substrateGlb = `/models/cad/${placement.substrate.glb}`;
+void placementYamls; // referenced for build-time enumeration parity
+
+const parts = Object.entries(placement.parts ?? {});
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{placement.label ?? placement.id} — 3dPCB-paper</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="back-link">&larr; gallery</a>
+      <h1>{placement.label ?? placement.id}</h1>
+      <div class="header-status">
+        <span class="build-status">embodiment pair</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <section class="embodiment-pair">
+        <article class="embodiment-pane">
+          <div class="pane-header">
+            <h2>Substrate (AnchorSCAD)</h2>
+            <span class="muted">{placement.substrate.glb}</span>
+          </div>
+          <model-viewer
+            id="viewer-substrate"
+            src={substrateGlb}
+            camera-controls
+            auto-rotate={false}
+            camera-orbit={cameraOrbit}
+            shadow-intensity="1"
+            exposure="0.9"
+            alt={`substrate ${placement.id}`}
+            style="width: 100%; height: 480px;"
+          />
+        </article>
+
+        <article class="embodiment-pane">
+          <div class="pane-header">
+            <h2>PCB (KiCad)</h2>
+            <span class="muted">{placement.pcb}</span>
+          </div>
+          {
+            pcbGlbExists ? (
+              <model-viewer
+                id="viewer-pcb"
+                src={pcbGlb}
+                camera-controls
+                auto-rotate={false}
+                camera-orbit={cameraOrbit}
+                shadow-intensity="1"
+                exposure="0.9"
+                alt={`pcb ${placement.id}`}
+                style="width: 100%; height: 480px;"
+              />
+            ) : (
+              <div class="pcb-placeholder" style="height: 480px;">
+                <p>PCB not yet rendered.</p>
+                <p class="muted">
+                  Run <code>bun run prebuild:kicad</code> once
+                  <code>code/kicad/{placement.pcb}</code> is authored.
+                </p>
+              </div>
+            )
+          }
+        </article>
+      </section>
+
+      <section class="embodiment-meta">
+        <h3>Placement</h3>
+        <dl class="meta-grid">
+          <dt>id</dt><dd>{placement.id}</dd>
+          <dt>pcb</dt><dd><code>{placement.pcb}</code></dd>
+          <dt>substrate glb</dt><dd><code>{placement.substrate.glb}</code></dd>
+          <dt>camera</dt><dd><code>{cameraKey}</code> &mdash; {cameraOrbit}</dd>
+        </dl>
+
+        {
+          parts.length > 0 && (
+            <>
+              <h3>Parts</h3>
+              <table class="parts-table">
+                <thead>
+                  <tr>
+                    <th>ref</th>
+                    <th>x</th>
+                    <th>y</th>
+                    <th>z</th>
+                    <th>rotation</th>
+                    <th>pinned</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {parts.map(([ref, p]) => (
+                    <tr>
+                      <td><code>{ref}</code></td>
+                      <td>{p.x}</td>
+                      <td>{p.y}</td>
+                      <td>{p.z}</td>
+                      <td>{(p.rotation ?? []).join(", ")}</td>
+                      <td>{p.pinned ? "yes" : "no"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </>
+          )
+        }
+      </section>
+    </main>
+
+    <script is:inline>
+      // CRITICAL: two-way camera sync between the substrate and PCB panes.
+      // Guard against the obvious infinite-feedback loop by latching a flag
+      // around programmatic setAttribute calls; model-viewer fires
+      // `camera-change` on every orbit tick, including ones we set.
+      (function () {
+        const a = document.getElementById("viewer-substrate");
+        const b = document.getElementById("viewer-pcb");
+        if (!a || !b || b.tagName !== "MODEL-VIEWER") return;
+        let mirroring = false;
+        function mirror(from, to) {
+          return () => {
+            if (mirroring) return;
+            mirroring = true;
+            try {
+              const orbit = from.getCameraOrbit?.();
+              if (orbit) {
+                to.cameraOrbit = `${orbit.theta}rad ${orbit.phi}rad ${orbit.radius}m`;
+                to.jumpCameraToGoal?.();
+              }
+            } finally {
+              mirroring = false;
+            }
+          };
+        }
+        a.addEventListener("camera-change", mirror(a, b));
+        b.addEventListener("camera-change", mirror(b, a));
+      })();
+    </script>
+  </body>
+</html>

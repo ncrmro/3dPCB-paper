@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+# Unified prebuild: stage both the AnchorSCAD and the KiCad GLBs into
+# public/models/ before astro build. Wired into package.json's
+# `prebuild` lifecycle so a plain `bun run build` does the right thing.
+
+set -euo pipefail
+
+WEB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+
+bash "$WEB_DIR/bin/prebuild-cad"
+bash "$WEB_DIR/bin/prebuild-kicad"
