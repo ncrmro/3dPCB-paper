@@ -1,4 +1,4 @@
-# kicad/spike — canonical electrical design
+# code/kicad — canonical electrical design
 
 This is the **Phase 0** KiCad project from `docs/plan.md`. It is the
 authoritative netlist source for the substrate compiler. A fabricated
@@ -32,12 +32,12 @@ reference project, which uses GPIO3/4.
 
 ## How to start
 
-1. Enter the KiCad dev shell from the `kicad/` directory:
+1. Enter the KiCad dev shell from the `code/kicad/` directory:
    ```bash
-   cd kicad
+   cd code/kicad
    nix develop      # provides `kicad` + `kicad-cli`
    ```
-2. Launch KiCad and create a new project here: `kicad/spike/spike.kicad_pro`.
+2. Launch KiCad and create a new project here: `code/kicad/spike.kicad_pro`.
 3. Import the symbols and footprints listed in `RESEARCH.md`. Per the
    license flags, **do not commit** SnapEDA or UltraLibrarian `.kicad_sym` /
    `.kicad_mod` files into this repo — reference part IDs in the BOM
@@ -50,10 +50,11 @@ reference project, which uses GPIO3/4.
 ## Directory layout
 
 ```
-kicad/spike/
+code/kicad/
 ├── README.md           # this file
 ├── RESEARCH.md         # symbol/footprint source catalogue + license flags
 ├── BOM.md              # populated once part numbers are pinned
+├── flake.nix
 ├── spike.kicad_pro     # (not yet authored)
 ├── spike.kicad_sch     # (not yet authored)
 ├── spike.kicad_pcb     # (not yet authored)
