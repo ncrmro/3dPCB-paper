@@ -58,6 +58,20 @@ processes:
       failure_threshold: 60
 
   # ---------------------------------------------------------------
+  # One-shot banner: prints the URL once the readiness probe passes
+  # so the port is easy to spot in the log stream (or TUI). Astro
+  # also logs the URL itself, but this gives a single grep-able line.
+  # ---------------------------------------------------------------
+  url:
+    command: |
+      printf '\n  → 3dPCB-paper gallery: http://127.0.0.1:%s/\n\n' "$${WEB_PORT}"
+    depends_on:
+      web:
+        condition: process_healthy
+    availability:
+      restart: "no"
+
+  # ---------------------------------------------------------------
   # CRITICAL: watchexec --postpone skips the initial fire so we don't
   # duplicate the prebuild step. The 500ms debounce coalesces saves
   # from editors that touch files multiple times in a row.
