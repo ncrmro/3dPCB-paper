@@ -1,0 +1,203 @@
+---
+// Focus route: /model/{project}/{name}/
+//
+// URL-driven slot pattern — clicking a card on the index lands here.
+// The page renders the focused model at the top of the layout, then
+// the full gallery underneath so navigation stays one click away.
+//
+// `project` is "cad" or "kicad"; `name` matches the manifest entry.
+// Both manifests are inlined at build time via Vite's ?raw glob.
+import { parse as parseYaml } from "yaml";
+import cadManifestYaml from "../../../manifest.cad.yaml?raw";
+import kicadManifestYaml from "../../../manifest.kicad.yaml?raw";
+
+interface CadModel {
+  name: string;
+  glb: string;
+  camera?: string;
+}
+interface CadManifest {
+  project: string;
+  cameras?: Record<string, string>;
+  models: CadModel[];
+}
+type KicadModel = { name: string; label?: string; camera?: string };
+type KicadManifest = {
+  project: string;
+  models: KicadModel[];
+  cameras?: Record<string, string>;
+};
+
+const cad = parseYaml(cadManifestYaml) as CadManifest;
+const kicad = parseYaml(kicadManifestYaml) as KicadManifest;
+const cadCameras = cad.cameras ?? {};
+const kicadCameras = kicad.cameras ?? {};
+
+export function getStaticPaths() {
+  const cadM = parseYaml(cadManifestYaml) as CadManifest;
+  const kicadM = parseYaml(kicadManifestYaml) as KicadManifest;
+  const paths: { params: { project: string; name: string }; props: Record<string, unknown> }[] = [];
+  for (const m of cadM.models) {
+    paths.push({ params: { project: "cad", name: m.name }, props: { model: m, project: "cad" } });
+  }
+  for (const m of kicadM.models) {
+    paths.push({ params: { project: "kicad", name: m.name }, props: { model: m, project: "kicad" } });
+  }
+  return paths;
+}
+
+interface FocusProps {
+  model: CadModel | KicadModel;
+  project: "cad" | "kicad";
+}
+const { model, project } = Astro.props as FocusProps;
+
+// Resolve the focused asset URLs + camera by project.
+let focusedGlb: string;
+let focusedCameraOrbit: string;
+let focusedLabel: string;
+let focusedImg: string | null = null;
+
+if (project === "cad") {
+  const m = model as CadModel;
+  focusedGlb = m.glb;
+  focusedCameraOrbit = cadCameras[m.camera ?? "iso"] ?? cadCameras.iso ?? "55deg 75deg 200mm";
+  focusedLabel = m.name;
+} else {
+  const m = model as KicadModel;
+  focusedGlb = `/models/kicad/${m.name}.glb`;
+  focusedCameraOrbit =
+    kicadCameras[m.camera ?? "iso"] ?? kicadCameras.iso ?? "55deg 75deg 200mm";
+  focusedLabel = m.label ?? m.name;
+  // KiCad's render-board produces an iso PNG alongside the GLB — use
+  // it as a static fallback (and a thumbnail-style "image" in the
+  // focused panel beside the interactive viewer).
+  focusedImg = `/models/kicad/${m.name}-iso.png`;
+}
+
+// Card models for the gallery strip below the focus panel.
+const cadCards = cad.models.map((m) => ({
+  ...m,
+  cameraOrbit: cadCameras[m.camera ?? "iso"] ?? cadCameras.iso,
+}));
+const kicadCards = kicad.models;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{focusedLabel} — 3dPCB-paper</title>
+    <link rel="stylesheet" href="/style.css" />
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+  </head>
+  <body>
+    <header class="header">
+      <a href="/" class="back-link">&larr; gallery</a>
+      <h1>{focusedLabel}</h1>
+      <div class="header-status">
+        <span class="build-status">{project}</span>
+      </div>
+    </header>
+
+    <main class="content">
+      <!-- Focus slot: large viewer for the URL-selected model. -->
+      <section class="focus-slot">
+        <div class="focus-pane">
+          <model-viewer
+            src={focusedGlb}
+            camera-controls
+            auto-rotate
+            camera-orbit={focusedCameraOrbit}
+            shadow-intensity="1"
+            exposure="0.9"
+            alt={focusedLabel}
+            style="width: 100%; height: 560px;"
+          />
+        </div>
+        {
+          focusedImg && (
+            <aside class="focus-thumb">
+              <h3>Iso render</h3>
+              <img src={focusedImg} alt={`${focusedLabel} isometric render`} />
+            </aside>
+          )
+        }
+      </section>
+
+      <!-- Gallery strip — same cards as `/`, but compact and linking back. -->
+      {
+        cadCards.length > 0 && (
+          <section class="model-group">
+            <div class="model-group-header">
+              <h2>AnchorSCAD ({cad.project})</h2>
+            </div>
+            <div class="screenshot-grid">
+              {cadCards.map((m) => (
+                <a
+                  class={`screenshot-card-link${
+                    project === "cad" && m.name === focusedLabel ? " is-focused" : ""
+                  }`}
+                  href={`/model/cad/${m.name}/`}
+                >
+                  <article class="screenshot-card">
+                    <model-viewer
+                      src={m.glb}
+                      camera-controls
+                      auto-rotate
+                      camera-orbit={m.cameraOrbit}
+                      shadow-intensity="1"
+                      exposure="0.9"
+                      alt={m.name}
+                    />
+                    <div class="card-footer">
+                      <span class="angle-label">{cad.project}</span>
+                      <span>{m.name}</span>
+                    </div>
+                  </article>
+                </a>
+              ))}
+            </div>
+          </section>
+        )
+      }
+
+      {
+        kicadCards.length > 0 && (
+          <section class="model-group gallery kicad">
+            <div class="model-group-header">
+              <h2>KiCad</h2>
+            </div>
+            <div class="screenshot-grid">
+              {kicadCards.map((m) => (
+                <a
+                  class={`screenshot-card-link${
+                    project === "kicad" && m.name === (model as KicadModel).name
+                      ? " is-focused"
+                      : ""
+                  }`}
+                  href={`/model/kicad/${m.name}/`}
+                >
+                  <article class="screenshot-card">
+                    <model-viewer
+                      src={`/models/kicad/${m.name}.glb`}
+                      alt={m.label ?? m.name}
+                      camera-controls
+                      auto-rotate
+                      style="width: 100%; height: 320px;"
+                    />
+                    <div class="card-footer">
+                      <span class="angle-label">kicad</span>
+                      <span>{m.label ?? m.name}</span>
+                    </div>
+                  </article>
+                </a>
+              ))}
+            </div>
+          </section>
+        )
+      }
+    </main>
+  </body>
+</html>
