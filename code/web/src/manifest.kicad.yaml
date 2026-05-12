@@ -7,7 +7,10 @@
 project: kicad
 models:
   - name: spike
-    label: "Spike (ESP32-C3 + SCD41 + BH1750)"
+    label: "Spike — bare board"
+    camera: iso
+  - name: spike-assembly
+    label: "Spike — assembled (PCB + ESP32 + SCD41 + BH1750)"
     camera: iso
 cameras:
   iso: "0,0,0,-30,0,30,200"

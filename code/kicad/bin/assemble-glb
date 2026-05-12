@@ -127,8 +127,9 @@ def main() -> int:
     )
     parser.add_argument(
         "--output",
-        default=str(kicad_dir / "build" / "spike.glb"),
-        help="merged GLB (default: overwrite build/spike.glb)",
+        default=str(kicad_dir / "build" / "spike-assembly.glb"),
+        help="merged GLB (default: build/spike-assembly.glb — keeps "
+        "the bare spike.glb intact so consumers can show both views)",
     )
     args = parser.parse_args()
 
