@@ -1,0 +1,52 @@
+#!/usr/bin/env bash
+# render-board — emit iso/top/bottom PNG views of a .kicad_pcb
+#
+# Usage: render-board PATH/TO/board.kicad_pcb [OUTPUT_DIR]
+#
+# Defaults OUTPUT_DIR to code/kicad/build/ relative to this script.
+# Three-view convention from docs/kicad/images.md: iso (--rotate '-30,0,30'),
+# top (--side top), bottom (--side bottom). Quality high + --floor.
+
+set -euo pipefail
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: $(basename "$0") PATH/TO/board.kicad_pcb [OUTPUT_DIR]" >&2
+  exit 2
+fi
+
+pcb="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+default_out="${script_dir}/../build"
+out_dir="${2:-$default_out}"
+
+if [[ ! -f "$pcb" ]]; then
+  echo "error: input not found: $pcb" >&2
+  exit 1
+fi
+
+mkdir -p "$out_dir"
+
+base="$(basename "$pcb" .kicad_pcb)"
+
+# CRITICAL: --quality high enables raytracing; --floor adds shadow plane.
+# Iso uses Euler rotation; top/bottom use --side which is mutually exclusive
+# with --rotate.
+kicad-cli pcb render "$pcb" \
+  -o "${out_dir}/${base}-iso.png" \
+  --rotate '-30,0,30' \
+  --quality high \
+  --floor
+
+kicad-cli pcb render "$pcb" \
+  -o "${out_dir}/${base}-top.png" \
+  --side top \
+  --quality high \
+  --floor
+
+kicad-cli pcb render "$pcb" \
+  -o "${out_dir}/${base}-bottom.png" \
+  --side bottom \
+  --quality high \
+  --floor
+
+echo "done: ${out_dir}/${base}-{iso,top,bottom}.png"

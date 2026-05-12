@@ -13,6 +13,13 @@ cad/build/
 build/
 *.stl
 
+# Keep the kicad build/ directory tracked (for prebuild scripts) but
+# ignore its generated contents. The negation must follow the broader
+# build/ rule above.
+!code/kicad/build/
+code/kicad/build/*
+!code/kicad/build/.gitkeep
+
 # Nix / direnv
 .direnv/
 .envrc.local
