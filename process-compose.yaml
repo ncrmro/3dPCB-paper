@@ -1,0 +1,80 @@
+# Dev orchestration: astro dev server + file watchers that re-stage
+# AnchorSCAD and KiCad GLBs into code/web/public/models/ when source
+# changes.
+#
+# Run: `nix develop -c process-compose up` from the repo root.
+# Run with TUI disabled: `process-compose up -t=false`.
+# Tail logs: `process-compose logs <name> --tail 200 --log-no-color`.
+
+version: "0.5"
+
+# Random high port avoids collisions with other dev servers on the
+# host. Reference with `$${WEB_PORT}` (double-dollar) so the shell
+# expands it at process spawn, not at YAML parse.
+env_cmds:
+  WEB_PORT: "shuf -i 10000-60000 -n 1"
+
+# PC_NO_SERVER skips process-compose's own HTTP API since we drive it
+# from the CLI only. If you need the API later, drop this line and
+# launch with `--use-uds` for a Unix socket instead of TCP.
+environment:
+  - "PC_NO_SERVER=1"
+
+processes:
+  # ---------------------------------------------------------------
+  # One-shot: stage models before the dev server starts so the first
+  # page load already has GLBs. Both halves of the pipeline run from
+  # their own nix shells so the right toolchain (openscad+assimp for
+  # cad, kicad-cli for kicad) is on PATH.
+  # ---------------------------------------------------------------
+  prebuild:
+    command: |
+      set -e
+      bash code/web/bin/prebuild-cad
+      nix develop ./code/kicad --command bash code/web/bin/prebuild-kicad
+    availability:
+      restart: "no"
+
+  # ---------------------------------------------------------------
+  # Astro dev server. Vite picks up changes under code/web/public/
+  # so the watchers below can update GLBs in-place.
+  # ---------------------------------------------------------------
+  web:
+    working_dir: code/web
+    command: nix develop --command bun run dev -- --port $${WEB_PORT} --host 127.0.0.1
+    depends_on:
+      prebuild:
+        condition: process_completed_successfully
+    availability:
+      restart: on_failure
+      backoff_seconds: 2
+    readiness_probe:
+      http_get:
+        host: 127.0.0.1
+        scheme: http
+        port: $${WEB_PORT}
+        path: /
+      period_seconds: 2
+      failure_threshold: 60
+
+  # ---------------------------------------------------------------
+  # CRITICAL: watchexec --postpone skips the initial fire so we don't
+  # duplicate the prebuild step. The 500ms debounce coalesces saves
+  # from editors that touch files multiple times in a row.
+  # ---------------------------------------------------------------
+  watch-cad:
+    command: nix develop --command watchexec --watch code/cad/src --exts py --postpone --debounce 500ms -- bash code/web/bin/prebuild-cad
+    depends_on:
+      web:
+        condition: process_started
+
+  # ---------------------------------------------------------------
+  # KiCad watcher runs inside the kicad flake so render-board and
+  # render-glb find kicad-cli on PATH. Watches both .kicad_pcb and
+  # .kicad_sch so a schematic change re-renders the board too.
+  # ---------------------------------------------------------------
+  watch-kicad:
+    command: nix develop ./code/kicad --command watchexec --watch code/kicad --exts kicad_pcb,kicad_sch --postpone --debounce 500ms -- bash code/web/bin/prebuild-kicad
+    depends_on:
+      web:
+        condition: process_started
