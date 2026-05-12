@@ -1,0 +1,61 @@
+---
+// Placeholder gallery index. Cards will become <model-viewer> bodies once
+// PRs E (AnchorSCAD GLBs) and F (KiCad GLBs) wire the render pipelines.
+const models: Array<{ id: string; title: string; project: string }> = [];
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>3dPCB-paper gallery</title>
+    <link rel="stylesheet" href="/style.css" />
+  </head>
+  <body>
+    <header class="header">
+      <h1>3dPCB-paper gallery</h1>
+      <div class="header-status">
+        <span class="build-status">Scaffold &mdash; no models yet</span>
+      </div>
+    </header>
+
+    <main class="content">
+      {
+        models.length === 0 ? (
+          <div class="empty-state">
+            <h2>No models yet</h2>
+            <p>
+              The AnchorSCAD and KiCad render pipelines will emit GLBs into
+              <code>public/models/</code> once PRs E and F land.
+            </p>
+          </div>
+        ) : (
+          <section class="model-group">
+            <div class="model-group-header">
+              <h2>Models</h2>
+            </div>
+            <div class="screenshot-grid">
+              {models.map((m) => (
+                <article class="screenshot-card">
+                  <div class="skeleton-img" />
+                  <div class="card-footer">
+                    <span class="angle-label">{m.project}</span>
+                    <span>{m.title}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )
+      }
+    </main>
+
+    <!-- Lightbox shell ported from cadeng; wired up in a later PR. -->
+    <div id="lightbox" class="lightbox">
+      <button class="lightbox-close" type="button">&times;</button>
+      <div id="lightbox-body"></div>
+      <div id="lightbox-caption" class="lightbox-caption"></div>
+    </div>
+  </body>
+</html>
