@@ -93,7 +93,11 @@ HEADERS_Y = ORIGIN_Y + 8.0
 
 PLACEMENTS = [
     # ref, anchorscad GLB name, kicad x_mm, kicad y_mm (pad-1), pin_count
-    ("ESP32", "esp32_c3_assembly", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9),
+    #
+    # Use the bare Supermini, not esp32_c3_assembly — the assembly
+    # version includes the carrier board, and the KiCad PCB itself
+    # IS that carrier here. Showing both would stack two boards.
+    ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9),
     ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4),
     ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5),
 ]
