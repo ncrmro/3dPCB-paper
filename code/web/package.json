@@ -8,7 +8,8 @@
     "prebuild": "bash bin/prebuild-cad",
     "build": "astro build",
     "preview": "astro preview",
-    "check": "astro check"
+    "check": "astro check",
+    "prebuild:kicad": "bash bin/prebuild-kicad"
   },
   "dependencies": {
     "@google/model-viewer": "latest",

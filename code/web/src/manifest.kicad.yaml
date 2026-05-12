@@ -1,0 +1,12 @@
+# KiCad gallery manifest (cadeng.yaml shape).
+#
+# Entries under `models` are populated by hand as `.kicad_pcb` files are
+# added to `code/kicad/`. Each model entry should match the basename of
+# its `.kicad_pcb`; `bin/prebuild-kicad` stages the corresponding GLB +
+# iso PNG into `public/models/kicad/{name}.glb` / `{name}-iso.png`.
+#
+# Empty `models` is intentional until the first board lands.
+project: kicad
+models: []
+cameras:
+  iso: "0,0,0,-30,0,30,200"
