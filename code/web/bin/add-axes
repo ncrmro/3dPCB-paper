@@ -1,0 +1,156 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#   "trimesh>=4.0",
+#   "numpy>=2.0",
+#   "scipy>=1.11",
+#   "networkx>=3.0",
+# ]
+# ///
+"""Bake an XYZ axis triad + ground grid into one or more GLB files.
+
+`<model-viewer>` has no built-in axes / grid the way AnchorSCAD or
+SketchUp does, so each gallery card needs the markers baked into
+its own GLB. This script post-processes the files in place after
+the cad / kicad render pipelines stage them.
+
+Axis colours follow the glTF / SketchUp convention:
+    X = red, Y = green, Z = blue.
+
+Axis length and grid half-extent are sized per-model from each
+GLB's bounding box, so a 13mm AnchorSCAD vitamin and an 80mm KiCad
+PCB both get appropriately scaled markers.
+
+Usage:
+    add-axes path1.glb [path2.glb ...]
+"""
+from __future__ import annotations
+
+import argparse
+import sys
+from pathlib import Path
+
+import numpy as np
+import trimesh
+
+
+def _axis_cylinder(direction: str, length: float, color_rgba: tuple) -> trimesh.Trimesh:
+    radius = length * 0.008
+    cyl = trimesh.creation.cylinder(radius=radius, height=length, sections=12)
+    rotations = {
+        "x": trimesh.transformations.rotation_matrix(np.pi / 2.0, [0.0, 1.0, 0.0]),
+        "y": trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0]),
+        "z": np.eye(4),
+    }
+    axis_unit = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}[direction]
+    cyl.apply_transform(rotations[direction])
+    cyl.apply_translation(np.array(axis_unit) * (length / 2.0))
+    cyl.visual.face_colors = np.tile(
+        np.array(color_rgba, dtype=np.uint8), (len(cyl.faces), 1)
+    )
+    return cyl
+
+
+def _ground_grid(extent: float, divisions: int = 20) -> trimesh.Trimesh:
+    verts: list[tuple] = []
+    faces: list[tuple] = []
+    colors: list[tuple] = []
+    step = (2 * extent) / divisions
+    light = (220, 220, 220, 255)
+    dark = (180, 180, 190, 255)
+    for ix in range(divisions):
+        for iz in range(divisions):
+            x0 = -extent + ix * step
+            z0 = -extent + iz * step
+            x1 = x0 + step
+            z1 = z0 + step
+            base = len(verts)
+            verts.extend(
+                [
+                    (x0, 0.0, z0),
+                    (x1, 0.0, z0),
+                    (x1, 0.0, z1),
+                    (x0, 0.0, z1),
+                ]
+            )
+            faces.extend([(base, base + 1, base + 2), (base, base + 2, base + 3)])
+            c = light if (ix + iz) % 2 == 0 else dark
+            colors.extend([c, c])
+    return trimesh.Trimesh(
+        vertices=np.array(verts, dtype=np.float32),
+        faces=np.array(faces, dtype=np.int32),
+        face_colors=np.array(colors, dtype=np.uint8),
+        process=False,
+    )
+
+
+def _bake(path: Path, axis_scale: float, grid_y_offset: float) -> int:
+    g = trimesh.load(str(path))
+    if isinstance(g, trimesh.Scene):
+        scene = g
+    else:
+        scene = trimesh.Scene()
+        scene.add_geometry(g)
+
+    # Drop any axis/grid nodes from a previous bake so reruns don't
+    # stack duplicates. Names are stable per this script.
+    for stale in ("axis_x", "axis_y", "axis_z", "ground_grid"):
+        if stale in scene.graph.nodes_geometry:
+            try:
+                scene.delete_geometry(scene.graph[stale][1])
+            except Exception:
+                pass
+
+    # Size axes from the model's bbox — works whether the GLB is in
+    # metres (KiCad output) or millimetres (AnchorSCAD).
+    bbox = scene.bounds
+    extent = float(np.max(bbox[1] - bbox[0])) * axis_scale
+
+    # Grid sits at y=0 by default; if the model's bottom is *below*
+    # zero (centred vitamin), shift the grid down to that level so
+    # it visually sits under the model rather than passing through.
+    grid = _ground_grid(extent=extent, divisions=20)
+    grid_y = min(0.0, float(bbox[0][1])) + grid_y_offset
+    if grid_y != 0.0:
+        grid.apply_translation([0.0, grid_y, 0.0])
+
+    scene.add_geometry(_axis_cylinder("x", extent, (220, 60, 60, 255)), node_name="axis_x")
+    scene.add_geometry(_axis_cylinder("y", extent, (60, 200, 60, 255)), node_name="axis_y")
+    scene.add_geometry(_axis_cylinder("z", extent, (60, 90, 220, 255)), node_name="axis_z")
+    scene.add_geometry(grid, node_name="ground_grid")
+
+    scene.export(str(path))
+    return path.stat().st_size
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("paths", nargs="+", type=Path)
+    parser.add_argument(
+        "--axis-scale",
+        type=float,
+        default=0.6,
+        help="axis length as a fraction of the model's largest bbox dim "
+        "(default: 0.6 = axes ~60%% of the model's longest edge)",
+    )
+    parser.add_argument(
+        "--grid-y-offset",
+        type=float,
+        default=0.0,
+        help="add this offset to the grid Y position (model units). "
+        "Negative values push the grid below the model.",
+    )
+    args = parser.parse_args()
+
+    for p in args.paths:
+        if not p.exists():
+            print(f"skip {p}: not found", file=sys.stderr)
+            continue
+        size = _bake(p, axis_scale=args.axis_scale, grid_y_offset=args.grid_y_offset)
+        print(f"axes baked into {p} ({size:,} bytes)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
