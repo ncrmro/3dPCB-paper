@@ -60,18 +60,65 @@ def _run(cmd: list[str]) -> bool:
 
 
 def _convert_3mf_to_glb(src: Path, dst: Path) -> bool:
-    """Use trimesh so per-face colors carry into the GLB."""
+    """Convert 3MF → GLB preserving OpenSCAD's per-color() face colors.
+
+    trimesh's stock 3MF loader collapses every basematerial into a
+    single "default" color (it doesn't honour the per-triangle pid
+    refs). We parse the 3MF XML directly, duplicate vertices per
+    triangle so each face owns its own corner colors, then hand the
+    expanded mesh to trimesh's GLB writer — which faithfully encodes
+    COLOR_0 vertex attributes that <model-viewer> renders.
+    """
     try:
+        import zipfile
+        from xml.etree import ElementTree as ET
+        import numpy as np  # type: ignore
         import trimesh  # type: ignore
-    except ImportError:
-        print("  ! trimesh not installed — skipping GLB", file=sys.stderr)
+    except ImportError as exc:
+        print(f"  ! missing dep for 3mf→glb: {exc}", file=sys.stderr)
         return False
     try:
-        scene = trimesh.load(str(src))
-        scene.export(str(dst))
+        with zipfile.ZipFile(src) as zf:
+            xml = zf.read("3D/3dmodel.model").decode("utf-8")
+        ns = {"m": "http://schemas.microsoft.com/3dmanufacturing/core/2015/02"}
+        root = ET.fromstring(xml)
+
+        colors: list[tuple[int, int, int, int]] = []
+        for bm in root.findall(".//m:basematerials/m:base", ns):
+            c = bm.get("displaycolor", "#888888FF").lstrip("#")
+            if len(c) == 6:
+                c += "FF"
+            colors.append(tuple(int(c[i : i + 2], 16) for i in (0, 2, 4, 6)))  # type: ignore[arg-type]
+
+        verts = [
+            (float(v.get("x") or 0), float(v.get("y") or 0), float(v.get("z") or 0))
+            for v in root.findall(".//m:mesh/m:vertices/m:vertex", ns)
+        ]
+
+        new_verts: list[tuple[float, float, float]] = []
+        new_colors: list[tuple[int, int, int, int]] = []
+        new_faces: list[tuple[int, int, int]] = []
+        default_color = (200, 200, 200, 255)
+        for tri in root.findall(".//m:mesh/m:triangles/m:triangle", ns):
+            v1, v2, v3 = int(tri.get("v1") or 0), int(tri.get("v2") or 0), int(tri.get("v3") or 0)
+            pid_attr = tri.get("p1")
+            pid = int(pid_attr) if pid_attr is not None else 0
+            color = colors[pid] if 0 <= pid < len(colors) else default_color
+            base = len(new_verts)
+            new_verts.extend([verts[v1], verts[v2], verts[v3]])
+            new_colors.extend([color, color, color])
+            new_faces.append((base, base + 1, base + 2))
+
+        mesh = trimesh.Trimesh(
+            vertices=np.array(new_verts, dtype=np.float32),
+            faces=np.array(new_faces, dtype=np.int32),
+            vertex_colors=np.array(new_colors, dtype=np.uint8),
+            process=False,
+        )
+        mesh.export(str(dst))
         return True
     except Exception as exc:  # noqa: BLE001 — best-effort
-        print(f"  ! trimesh 3mf→glb failed: {exc}", file=sys.stderr)
+        print(f"  ! 3mf→glb failed: {exc}", file=sys.stderr)
         return False
 
 

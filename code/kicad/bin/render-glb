@@ -29,6 +29,20 @@ mkdir -p "$out_dir"
 base="$(basename "$pcb" .kicad_pcb)"
 out="${out_dir}/${base}.glb"
 
-kicad-cli pcb export glb "$pcb" -o "$out"
+# `kicad-cli pcb export glb` defaults to board body + 3D component
+# meshes only — no copper, no silk, no soldermask. The result looks
+# like a bare green slab. Include the full stackup so the GLB
+# matches what `kicad-cli pcb render` raytraces into the iso PNG:
+# tracks, pads, zones (copper pours), silkscreen, and soldermask
+# (green tint where there's no copper). `--fuse-shapes` coalesces
+# overlapping geometry to keep the GLB small.
+kicad-cli pcb export glb "$pcb" -o "$out" \
+  --include-tracks \
+  --include-pads \
+  --include-zones \
+  --include-silkscreen \
+  --include-soldermask \
+  --fuse-shapes \
+  --force
 
 echo "done: ${out}"
