@@ -1,0 +1,34 @@
+#!/usr/bin/env bash
+# render-glb — export a .kicad_pcb to GLB via kicad-cli.
+#
+# Usage: render-glb PATH/TO/board.kicad_pcb [OUTPUT_DIR]
+#
+# Defaults OUTPUT_DIR to code/kicad/build/ relative to this script.
+# The GLB feeds <model-viewer> in the planned gallery (see
+# docs/plants/W20-demoable-paper.md).
+
+set -euo pipefail
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: $(basename "$0") PATH/TO/board.kicad_pcb [OUTPUT_DIR]" >&2
+  exit 2
+fi
+
+pcb="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+default_out="${script_dir}/../build"
+out_dir="${2:-$default_out}"
+
+if [[ ! -f "$pcb" ]]; then
+  echo "error: input not found: $pcb" >&2
+  exit 1
+fi
+
+mkdir -p "$out_dir"
+
+base="$(basename "$pcb" .kicad_pcb)"
+out="${out_dir}/${base}.glb"
+
+kicad-cli pcb export glb "$pcb" -o "$out"
+
+echo "done: ${out}"
