@@ -1,11 +1,13 @@
 ---
-// Gallery index. Reads the cad manifest at build time and renders one
-// <model-viewer> card per registered AnchorSCAD part. The KiCad half of
-// the gallery lands in PR F via a sibling manifest.kicad.yaml.
+// Gallery index. Reads the cad + kicad manifests at build time and
+// renders one <model-viewer> card per registered AnchorSCAD part / KiCad
+// board.
 //
 // Vite's `?raw` query inlines the YAML at build time, which keeps Astro
 // happy under both dev (HMR) and SSG (no need to copy files into the
 // prerender chunk dir).
+import { readFileSync } from "node:fs";
+import { fileURLToPath } from "node:url";
 import { parse as parseYaml } from "yaml";
 import manifestYaml from "../manifest.cad.yaml?raw";
 
@@ -27,6 +29,23 @@ const cardModels = cad.models.map((m) => ({
   ...m,
   cameraOrbit: cameras[m.camera ?? "iso"] ?? cameras.iso,
 }));
+
+// KiCad manifest — populated by hand as .kicad_pcb files land; the
+// prebuild script (bin/prebuild-kicad) stages matching GLB + iso PNG
+// into public/models/kicad/.
+type KicadModel = { name: string; label?: string; camera?: string };
+type KicadManifest = {
+  project: string;
+  models: KicadModel[];
+  cameras?: Record<string, string>;
+};
+const kicadManifestPath = fileURLToPath(
+  new URL("../manifest.kicad.yaml", import.meta.url),
+);
+const kicadManifest = parseYaml(
+  readFileSync(kicadManifestPath, "utf8"),
+) as KicadManifest;
+const kicadModels: KicadModel[] = kicadManifest.models ?? [];
 ---
 
 <!doctype html>
@@ -84,6 +103,39 @@ const cardModels = cad.models.map((m) => ({
           </section>
         )
       }
+
+      <!-- KiCad gallery section -->
+      <section class="model-group gallery kicad">
+        <div class="model-group-header">
+          <h2>KiCad</h2>
+        </div>
+        {
+          kicadModels.length === 0 ? (
+            <p class="empty-state-inline">
+              no boards rendered yet &mdash; see <code>code/kicad/</code>
+            </p>
+          ) : (
+            <div class="screenshot-grid">
+              {kicadModels.map((m) => (
+                <article class="screenshot-card">
+                  <model-viewer
+                    src={`/models/kicad/${m.name}.glb`}
+                    alt={m.label ?? m.name}
+                    camera-controls
+                    auto-rotate
+                    style="width: 100%; height: 320px;"
+                  />
+                  <div class="card-footer">
+                    <span class="angle-label">kicad</span>
+                    <span>{m.label ?? m.name}</span>
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
+        }
+      </section>
+      <!-- /KiCad gallery section -->
     </main>
 
     <!-- Lightbox shell ported from cadeng; wired up in a later PR. -->

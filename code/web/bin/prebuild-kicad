@@ -1,0 +1,44 @@
+#!/usr/bin/env bash
+# prebuild-kicad — render KiCad GLB + iso PNG previews into web public/.
+#
+# Discovers every *.kicad_pcb under code/kicad/, runs render-board and
+# render-glb on each, then copies the GLB and iso PNG into
+# code/web/public/models/kicad/ for Astro to serve.
+#
+# Runnable from any CWD; paths resolve relative to this script.
+# Exits 0 with an info log when no boards exist yet — the rest of the
+# build pipeline must keep working before the first .kicad_pcb lands.
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+web_dir="$(cd "${script_dir}/.." && pwd)"
+code_dir="$(cd "${web_dir}/.." && pwd)"
+kicad_dir="${code_dir}/kicad"
+kicad_build="${kicad_dir}/build"
+out_dir="${web_dir}/public/models/kicad"
+
+mkdir -p "$out_dir"
+
+# CRITICAL: -maxdepth 3 mirrors the documented layout (code/kicad/*.kicad_pcb
+# or code/kicad/<subdir>/*.kicad_pcb). Going deeper risks pulling in
+# kicad-cli fixtures or stray fabrication outputs.
+mapfile -t pcbs < <(find "$kicad_dir" -maxdepth 3 -name '*.kicad_pcb' -print | sort)
+
+if [[ ${#pcbs[@]} -eq 0 ]]; then
+  echo "info: no boards yet — skipping kicad prebuild (no *.kicad_pcb under ${kicad_dir})"
+  exit 0
+fi
+
+for pcb in "${pcbs[@]}"; do
+  base="$(basename "$pcb" .kicad_pcb)"
+  echo "prebuild-kicad: rendering ${base}"
+
+  "${kicad_dir}/bin/render-board" "$pcb" "$kicad_build"
+  "${kicad_dir}/bin/render-glb"   "$pcb" "$kicad_build"
+
+  cp "${kicad_build}/${base}.glb"     "${out_dir}/${base}.glb"
+  cp "${kicad_build}/${base}-iso.png" "${out_dir}/${base}-iso.png"
+done
+
+echo "done: ${#pcbs[@]} board(s) staged under ${out_dir}"
