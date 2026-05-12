@@ -61,9 +61,28 @@ def kicad_to_glb(fx_mm: float, fy_mm: float, extra_z_mm: float = 0.0) -> np.ndar
 
 
 def anchorscad_orient() -> np.ndarray:
-    """4x4 transform aligning AnchorSCAD's Z-up to glTF's Y-up."""
-    # 90° rotation around +X maps (x, y, z) → (x, z, -y).
-    return trimesh.transformations.rotation_matrix(np.pi / 2.0, [1.0, 0.0, 0.0])
+    """4x4 transform aligning AnchorSCAD's Z-up to glTF's Y-up.
+
+    The vitamins are authored with the breakout PCB's underside (pins)
+    at -Z and the sensor face / component side at +Z. We want pins
+    pointing DOWN into the board's headers in glTF, i.e. -Y. That's a
+    -90° rotation around +X: (x, y, z) → (x, z, -y). The earlier
+    +90° put pins at +Y, which is why every module appeared flipped.
+    """
+    return trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0])
+
+
+def yaw_matrix(deg: float) -> np.ndarray:
+    """Rotation around the AnchorSCAD module's own Z (vertical) axis.
+
+    Applied in the module's native frame BEFORE `anchorscad_orient`,
+    so the sense matches "spin the breakout PCB around its centre on
+    the workbench". Positive degrees = counter-clockwise looking down
+    the +Z axis (right-hand rule).
+    """
+    return trimesh.transformations.rotation_matrix(
+        np.radians(deg), [0.0, 0.0, 1.0]
+    )
 
 
 def scale_matrix(s: float) -> np.ndarray:
@@ -92,14 +111,21 @@ J3_X = ORIGIN_X + 60.0
 HEADERS_Y = ORIGIN_Y + 8.0
 
 PLACEMENTS = [
-    # ref, anchorscad GLB name, kicad x_mm, kicad y_mm (pad-1), pin_count
+    # ref, anchorscad GLB name, kicad x_mm, kicad y_mm (pad-1),
+    # pin_count, yaw_deg (around module Z before orient).
     #
     # Use the bare Supermini, not esp32_c3_assembly — the assembly
     # version includes the carrier board, and the KiCad PCB itself
     # IS that carrier here. Showing both would stack two boards.
-    ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9),
-    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4),
-    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5),
+    #
+    # Sensors are authored with the pin row along one edge; on the
+    # spike PCB the pins run vertically (along KiCad +Y) so the
+    # sensor PCB needs a 90° yaw to align its pin row to that axis.
+    # The Supermini is already symmetric across its two-row header
+    # block, so its yaw stays at 0.
+    ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9, 0.0),
+    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4, 90.0),
+    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5, 90.0),
 ]
 
 
@@ -155,7 +181,7 @@ def main() -> int:
     orient = anchorscad_orient()
     scale = scale_matrix(MM_TO_M)
 
-    for ref, name, fx, fy, pin_count in PLACEMENTS:
+    for ref, name, fx, fy, pin_count, yaw_deg in PLACEMENTS:
         glb_path = cad_build_dir / f"{name}.glb"
         if not glb_path.exists():
             print(f"  skip {ref} ({name}): {glb_path} not found")
@@ -163,8 +189,11 @@ def main() -> int:
         vitamin = _load_scene(glb_path)
         cy_kicad = fy + ((pin_count - 1) * PITCH) / 2.0
         translation = kicad_to_glb(fx, cy_kicad)
+        # Compose: yaw (module frame) → scale (mm → m) → orient (Z-up
+        # to Y-up) → translate (to footprint position). Matrix order
+        # is the reverse of application order with @.
         node_transform = (
-            translate_matrix(translation) @ orient @ scale
+            translate_matrix(translation) @ orient @ scale @ yaw_matrix(yaw_deg)
         )
         for geom_name, geom in vitamin.geometry.items():
             scene.add_geometry(
@@ -172,7 +201,7 @@ def main() -> int:
                 node_name=f"{ref}__{geom_name}",
                 transform=node_transform,
             )
-        print(f"  placed {ref} ({name}) at glb {translation.tolist()}")
+        print(f"  placed {ref} ({name}) yaw={yaw_deg}° at glb {translation.tolist()}")
 
     scene.export(str(out_path))
     print(f"wrote {out_path} ({out_path.stat().st_size:,} bytes)")
