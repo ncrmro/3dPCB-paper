@@ -37,6 +37,19 @@ for pcb in "${pcbs[@]}"; do
   "${kicad_dir}/bin/render-board" "$pcb" "$kicad_build"
   "${kicad_dir}/bin/render-glb"   "$pcb" "$kicad_build"
 
+  # Merge AnchorSCAD vitamin meshes onto the bare PCB GLB so the
+  # final asset shows the assembled board (PCB + tracks + headers +
+  # ESP32 + sensors). The assembler runs in the cad shell because it
+  # needs trimesh/uv; the kicad shell doesn't. Only runs if the cad
+  # build outputs exist — first runs after a clean checkout may see
+  # no GLBs to merge.
+  if ls "${code_dir}/cad/build/"*.glb >/dev/null 2>&1; then
+    echo "prebuild-kicad: assembling ${base} with cad vitamins"
+    (cd "${code_dir}/cad" && nix develop --command "${kicad_dir}/bin/assemble-glb")
+  else
+    echo "prebuild-kicad: no cad GLBs yet — shipping bare PCB"
+  fi
+
   cp "${kicad_build}/${base}.glb"     "${out_dir}/${base}.glb"
   cp "${kicad_build}/${base}-iso.png" "${out_dir}/${base}-iso.png"
 done

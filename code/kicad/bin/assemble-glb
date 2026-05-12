@@ -1,0 +1,178 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = ["trimesh>=4.0", "numpy>=2.0", "lxml>=5.0", "networkx>=3.0"]
+# ///
+"""Merge code/kicad/build/spike.glb with the AnchorSCAD vitamin GLBs.
+
+`kicad-cli pcb export glb` honours `(model ...)` refs only when they
+point at STEP files. We compose at a higher level instead: the bare
+KiCad PCB exports as one GLB (board + tracks + silkscreen + …); each
+AnchorSCAD vitamin exports as its own GLB; this script positions the
+vitamin meshes above the corresponding KiCad footprints and merges
+the lot into a single assembled GLB.
+
+The result is what shows up in code/web/public/models/kicad/spike.glb
+— the full embodiment: PCB + tracks + headers' worth of breakout
+modules on top.
+"""
+from __future__ import annotations
+
+import argparse
+from pathlib import Path
+
+import numpy as np
+import trimesh
+
+
+# ----- KiCad → GLB coordinate transform --------------------------------
+# kicad-cli writes the GLB in meters, glTF Y-up. The PCB's KiCad-space
+# coordinates (mm, Y-down page) map to GLB coords as:
+#   x_glb = x_kicad / 1000
+#   y_glb = z_kicad / 1000      (KiCad Z-up becomes glTF Y-up)
+#   z_glb = y_kicad / 1000      (KiCad Y down-page maps to glTF +Z)
+#
+# AnchorSCAD vitamins are authored mm, Z-up. To place one at a KiCad
+# footprint (fx, fy) we:
+#   1. Scale by 1/1000 (mm → m).
+#   2. Rotate 90° around glTF +X so the vitamin's Z-up axis lines up
+#      with glTF Y-up. After this rotation the vitamin's Y now points
+#      in glTF -Z; we re-flip via a 180° Y rotation if needed.
+#   3. Translate to (fx/1000, board_top_y, fy/1000).
+#
+# board_top_y = (kicad-cli centres the PCB body around y=0 in the GLB;
+# top of board is at +half_thickness ≈ 0.0008m). We over-lift by the
+# header height so the breakout sits above the pins, not in them.
+
+MM_TO_M = 1.0 / 1000.0
+BOARD_TOP_Y_M = 0.0008  # half of 1.6mm board thickness
+HEADER_HEIGHT_M = 8.5 * MM_TO_M  # 8.5mm female-header body height
+
+
+def kicad_to_glb(fx_mm: float, fy_mm: float, extra_z_mm: float = 0.0) -> np.ndarray:
+    """Return the (x, y, z) translation in GLB metres for a KiCad footprint."""
+    return np.array(
+        [
+            fx_mm * MM_TO_M,
+            BOARD_TOP_Y_M + HEADER_HEIGHT_M + extra_z_mm * MM_TO_M,
+            fy_mm * MM_TO_M,
+        ]
+    )
+
+
+def anchorscad_orient() -> np.ndarray:
+    """4x4 transform aligning AnchorSCAD's Z-up to glTF's Y-up."""
+    # 90° rotation around +X maps (x, y, z) → (x, z, -y).
+    return trimesh.transformations.rotation_matrix(np.pi / 2.0, [1.0, 0.0, 0.0])
+
+
+def scale_matrix(s: float) -> np.ndarray:
+    m = np.eye(4)
+    m[0, 0] = m[1, 1] = m[2, 2] = s
+    return m
+
+
+def translate_matrix(v: np.ndarray) -> np.ndarray:
+    m = np.eye(4)
+    m[:3, 3] = v
+    return m
+
+
+# Placements: which AnchorSCAD GLB sits over which KiCad footprint.
+# Coordinates match gen_spike_pcb.py's footprint positions; the
+# Supermini straddles J1A + J1B so we centre it between them.
+ORIGIN_X = 100.0  # gen_spike_pcb.py ORIGIN_X
+ORIGIN_Y = 60.0   # gen_spike_pcb.py ORIGIN_Y
+PITCH = 2.54
+
+J1A_X = ORIGIN_X + 10.0
+J1B_X = J1A_X + 17.78
+J2_X = ORIGIN_X + 45.0
+J3_X = ORIGIN_X + 60.0
+HEADERS_Y = ORIGIN_Y + 8.0
+
+PLACEMENTS = [
+    # ref, anchorscad GLB name, kicad x_mm, kicad y_mm (pad-1), pin_count
+    ("ESP32", "esp32_c3_assembly", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9),
+    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4),
+    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5),
+]
+
+
+def _load_scene(path: Path) -> trimesh.Scene:
+    """Load a GLB as a Scene preserving its per-mesh materials."""
+    g = trimesh.load(str(path))
+    if isinstance(g, trimesh.Scene):
+        return g
+    s = trimesh.Scene()
+    s.add_geometry(g)
+    return s
+
+
+def main() -> int:
+    here = Path(__file__).resolve().parent
+    kicad_dir = here.parent
+    cad_build = kicad_dir.parent / "cad" / "build"
+
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument(
+        "--pcb-glb",
+        default=str(kicad_dir / "build" / "spike.glb"),
+        help="bare PCB GLB exported by kicad-cli (default: build/spike.glb)",
+    )
+    parser.add_argument(
+        "--cad-build",
+        default=str(cad_build),
+        help="directory of AnchorSCAD GLBs (default: ../cad/build)",
+    )
+    parser.add_argument(
+        "--output",
+        default=str(kicad_dir / "build" / "spike.glb"),
+        help="merged GLB (default: overwrite build/spike.glb)",
+    )
+    args = parser.parse_args()
+
+    pcb_path = Path(args.pcb_glb)
+    cad_build_dir = Path(args.cad_build)
+    out_path = Path(args.output)
+
+    if not pcb_path.exists():
+        print(f"error: PCB GLB not found: {pcb_path}")
+        return 1
+
+    # Start from the PCB scene and add each vitamin as its own
+    # geometry node with its own transform. Scene preserves per-mesh
+    # materials through GLB export — concat would flatten the
+    # PBR / vertex-color metadata kicad-cli wrote into the PCB GLB.
+    scene = _load_scene(pcb_path)
+    print(f"loaded PCB: {len(scene.geometry)} mesh(es), bbox {scene.bounds.tolist()}")
+
+    orient = anchorscad_orient()
+    scale = scale_matrix(MM_TO_M)
+
+    for ref, name, fx, fy, pin_count in PLACEMENTS:
+        glb_path = cad_build_dir / f"{name}.glb"
+        if not glb_path.exists():
+            print(f"  skip {ref} ({name}): {glb_path} not found")
+            continue
+        vitamin = _load_scene(glb_path)
+        cy_kicad = fy + ((pin_count - 1) * PITCH) / 2.0
+        translation = kicad_to_glb(fx, cy_kicad)
+        node_transform = (
+            translate_matrix(translation) @ orient @ scale
+        )
+        for geom_name, geom in vitamin.geometry.items():
+            scene.add_geometry(
+                geom,
+                node_name=f"{ref}__{geom_name}",
+                transform=node_transform,
+            )
+        print(f"  placed {ref} ({name}) at glb {translation.tolist()}")
+
+    scene.export(str(out_path))
+    print(f"wrote {out_path} ({out_path.stat().st_size:,} bytes)")
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
