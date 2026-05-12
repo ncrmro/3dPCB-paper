@@ -8,17 +8,22 @@
 
 version: "0.5"
 
-# Random high port avoids collisions with other dev servers on the
-# host. Reference with `$${WEB_PORT}` (double-dollar) so the shell
-# expands it at process spawn, not at YAML parse.
+# Pinned to Astro's default so the gallery is always at the same
+# URL. Switch back to `shuf -i 10000-60000 -n 1` if you need to run
+# multiple gallery instances on one host. Reference with
+# `$${WEB_PORT}` (double-dollar) so the shell expands at process
+# spawn, not at YAML parse.
 env_cmds:
-  WEB_PORT: "shuf -i 10000-60000 -n 1"
+  WEB_PORT: "echo 4321"
 
-# PC_NO_SERVER skips process-compose's own HTTP API since we drive it
-# from the CLI only. If you need the API later, drop this line and
-# launch with `--use-uds` for a Unix socket instead of TCP.
-environment:
-  - "PC_NO_SERVER=1"
+# process-compose's own HTTP API stays on (default :8080) so the
+# dependency graph at http://127.0.0.1:8080/graph and the web TUI
+# remain available. The earlier `PC_NO_SERVER=1` line lived in the
+# YAML's `environment:` block, which sets vars for spawned processes
+# — process-compose reads PC_NO_SERVER from its OWN env at launch,
+# so the line was a no-op. Removed to avoid the false implication.
+# To actually disable the API: `process-compose up --no-server`,
+# or `--use-uds` for a Unix-socket-only mode.
 
 processes:
   # ---------------------------------------------------------------
