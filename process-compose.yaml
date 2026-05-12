@@ -41,6 +41,19 @@ processes:
       restart: "no"
 
   # ---------------------------------------------------------------
+  # One-shot: install the bun workspace deps. `bun install` from a
+  # workspace member resolves the workspace at code/package.json and
+  # symlinks `astro` etc. into the hoisted node_modules. Without this
+  # `bun run dev` crashes with "astro: command not found" on a fresh
+  # checkout. No-op when node_modules is already up to date.
+  # ---------------------------------------------------------------
+  web-deps:
+    working_dir: code/web
+    command: nix develop --command bun install
+    availability:
+      restart: "no"
+
+  # ---------------------------------------------------------------
   # Astro dev server. Vite picks up changes under code/web/public/
   # so the watchers below can update GLBs in-place.
   # ---------------------------------------------------------------
@@ -48,6 +61,8 @@ processes:
     working_dir: code/web
     command: nix develop --command bun run dev -- --port $${WEB_PORT} --host 127.0.0.1
     depends_on:
+      web-deps:
+        condition: process_completed_successfully
       prebuild:
         condition: process_completed_successfully
     availability:
