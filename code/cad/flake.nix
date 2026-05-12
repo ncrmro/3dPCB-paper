@@ -29,6 +29,9 @@
             # CAD tools (wrapped openscad with EGL headless support)
             cadeng.packages.${system}.openscad
 
+            # STL -> GLB conversion for the Astro <model-viewer> gallery.
+            pkgs.assimp
+
             # Build dependencies for Python packages
             pkgs.stdenv.cc.cc.lib
             pkgs.zlib

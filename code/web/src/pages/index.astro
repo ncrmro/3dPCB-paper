@@ -1,7 +1,32 @@
 ---
-// Placeholder gallery index. Cards will become <model-viewer> bodies once
-// PRs E (AnchorSCAD GLBs) and F (KiCad GLBs) wire the render pipelines.
-const models: Array<{ id: string; title: string; project: string }> = [];
+// Gallery index. Reads the cad manifest at build time and renders one
+// <model-viewer> card per registered AnchorSCAD part. The KiCad half of
+// the gallery lands in PR F via a sibling manifest.kicad.yaml.
+//
+// Vite's `?raw` query inlines the YAML at build time, which keeps Astro
+// happy under both dev (HMR) and SSG (no need to copy files into the
+// prerender chunk dir).
+import { parse as parseYaml } from "yaml";
+import manifestYaml from "../manifest.cad.yaml?raw";
+
+interface CadModel {
+  name: string;
+  glb: string;
+  camera?: string;
+}
+
+interface CadManifest {
+  project: string;
+  cameras?: Record<string, string>;
+  models: CadModel[];
+}
+
+const cad = parseYaml(manifestYaml) as CadManifest;
+const cameras = cad.cameras ?? {};
+const cardModels = cad.models.map((m) => ({
+  ...m,
+  cameraOrbit: cameras[m.camera ?? "iso"] ?? cameras.iso,
+}));
 ---
 
 <!doctype html>
@@ -11,37 +36,47 @@ const models: Array<{ id: string; title: string; project: string }> = [];
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>3dPCB-paper gallery</title>
     <link rel="stylesheet" href="/style.css" />
+    <!-- model-viewer registers <model-viewer> as a custom element on import. -->
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
   </head>
   <body>
     <header class="header">
       <h1>3dPCB-paper gallery</h1>
       <div class="header-status">
-        <span class="build-status">Scaffold &mdash; no models yet</span>
+        <span class="build-status">{cardModels.length} AnchorSCAD part(s)</span>
       </div>
     </header>
 
     <main class="content">
       {
-        models.length === 0 ? (
+        cardModels.length === 0 ? (
           <div class="empty-state">
             <h2>No models yet</h2>
             <p>
-              The AnchorSCAD and KiCad render pipelines will emit GLBs into
-              <code>public/models/</code> once PRs E and F land.
+              Run <code>bun run build</code> from <code>code/web/</code> to
+              invoke the AnchorSCAD render pipeline.
             </p>
           </div>
         ) : (
           <section class="model-group">
             <div class="model-group-header">
-              <h2>Models</h2>
+              <h2>AnchorSCAD ({cad.project})</h2>
             </div>
             <div class="screenshot-grid">
-              {models.map((m) => (
+              {cardModels.map((m) => (
                 <article class="screenshot-card">
-                  <div class="skeleton-img" />
+                  <model-viewer
+                    src={m.glb}
+                    camera-controls
+                    auto-rotate
+                    camera-orbit={m.cameraOrbit}
+                    shadow-intensity="1"
+                    exposure="0.9"
+                    alt={m.name}
+                  />
                   <div class="card-footer">
-                    <span class="angle-label">{m.project}</span>
-                    <span>{m.title}</span>
+                    <span class="angle-label">{cad.project}</span>
+                    <span>{m.name}</span>
                   </div>
                 </article>
               ))}

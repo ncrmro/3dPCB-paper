@@ -1,9 +1,26 @@
 #!/usr/bin/env -S uv run python
-"""Render spike vitamins to .scad files."""
+"""Render registered AnchorSCAD parts to .scad, .stl, and .glb.
 
+Pipeline per part:
+    factory() -> ad.Shape -> .scad (anchorscad)
+    .scad -> .stl (openscad -o out.stl in.scad)
+    .stl -> .glb (assimp export in.stl out.glb)
+
+Emits build/manifest.json listing each part with relative paths to its
+.scad/.stl/.glb so downstream consumers (the Astro gallery) can wire up
+cards without re-scanning the build dir.
+
+Backward compatible: callers that only need .scad still get them. STL/GLB
+steps are best-effort — a failure in one part does not abort the whole
+run, the manifest just omits the missing path.
+"""
+
+import json
 import sys
 import importlib
 import pkgutil
+import shutil
+import subprocess
 from pathlib import Path
 from unittest.mock import MagicMock
 
@@ -13,9 +30,9 @@ sys.path.insert(0, str(REPO_ROOT / "src"))
 sys.modules["OpenGL"] = MagicMock()
 sys.modules["OpenGL.GL"] = MagicMock()
 
-import anchorscad as ad
-import registry
-import vitamins
+import anchorscad as ad  # noqa: E402
+import registry  # noqa: E402
+import vitamins  # noqa: E402
 
 
 def _walk(package):
@@ -23,22 +40,67 @@ def _walk(package):
         yield importlib.import_module(name)
 
 
-def main():
+def _run(cmd: list[str]) -> bool:
+    """Run cmd; return True on success, False otherwise (don't raise)."""
+    try:
+        subprocess.run(cmd, check=True, capture_output=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError) as exc:
+        stderr = getattr(exc, "stderr", None)
+        msg = stderr.decode(errors="replace") if stderr else str(exc)
+        tail = msg.strip().splitlines()[-1] if msg.strip() else str(exc)
+        print(f"  ! {cmd[0]} failed: {tail}", file=sys.stderr)
+        return False
+
+
+def main() -> int:
     out = REPO_ROOT / "build"
     out.mkdir(exist_ok=True)
 
     for mod in _walk(vitamins):
         registry.auto_register_module(mod, part_type="vitamin")
 
-    for name, (factory, _ptype, fmt) in registry.get_registry().items():
-        shape = factory()
+    have_openscad = shutil.which("openscad") is not None
+    have_assimp = shutil.which("assimp") is not None
+    if not have_openscad:
+        print("note: 'openscad' not on PATH — skipping STL/GLB steps", file=sys.stderr)
+    if not have_assimp:
+        print("note: 'assimp' not on PATH — skipping GLB step", file=sys.stderr)
+
+    manifest_models: list[dict] = []
+    for name, (factory, ptype, fmt) in registry.get_registry().items():
         if fmt != "anchorscad":
             continue
-        scad = ad.render(shape).rendered_shape.code.code
-        path = out / f"{name}.scad"
-        path.write_text(scad)
-        print(f"wrote {path}")
+
+        shape = factory()
+        scad_path = out / f"{name}.scad"
+        scad_path.write_text(ad.render(shape).rendered_shape.code.code)
+        print(f"wrote {scad_path}")
+
+        entry: dict = {
+            "name": name,
+            "type": ptype,
+            "scad": scad_path.relative_to(out).as_posix(),
+        }
+
+        stl_path = out / f"{name}.stl"
+        if have_openscad and _run(["openscad", "-o", str(stl_path), str(scad_path)]):
+            print(f"wrote {stl_path}")
+            entry["stl"] = stl_path.relative_to(out).as_posix()
+
+            glb_path = out / f"{name}.glb"
+            if have_assimp and _run(["assimp", "export", str(stl_path), str(glb_path)]):
+                print(f"wrote {glb_path}")
+                entry["glb"] = glb_path.relative_to(out).as_posix()
+
+        manifest_models.append(entry)
+
+    manifest = {"project": "cad", "models": manifest_models}
+    manifest_path = out / "manifest.json"
+    manifest_path.write_text(json.dumps(manifest, indent=2) + "\n")
+    print(f"wrote {manifest_path}")
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    sys.exit(main())

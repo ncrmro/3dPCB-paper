@@ -1,0 +1,60 @@
+#!/usr/bin/env bash
+# Prebuild step for the CAD half of the gallery.
+#
+# 1. Invoke the AnchorSCAD render pipeline via its own devshell. We pin
+#    to `nix develop -c` so the script picks up `openscad` + `assimp`
+#    from `code/cad/flake.nix` even when run from `code/web/`'s shell.
+# 2. Mirror every .glb the renderer produced into
+#    `code/web/public/models/cad/`. We rsync rather than cp so reruns
+#    don't duplicate files and Astro's static copy stays in sync with
+#    the source of truth.
+#
+# Idempotent: safe to call repeatedly. Astro's `build` script chains
+# this in front of `astro build` (see package.json).
+
+set -euo pipefail
+
+# Resolve to the web/ root regardless of cwd so this works from
+# package.json scripts (which run with cwd = package dir) and from
+# bare shells.
+WEB_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+CAD_DIR="$(cd "$WEB_DIR/../cad" && pwd)"
+PUBLIC_CAD_DIR="$WEB_DIR/public/models/cad"
+
+mkdir -p "$PUBLIC_CAD_DIR"
+
+echo "[prebuild-cad] rendering AnchorSCAD parts via $CAD_DIR/bin/render"
+# TODO: tighten to `set -e` once cadeng has a stable release tag we can
+# pin to. Today the cad flake follows `github:ncrmro/cadeng` HEAD, which
+# trips GitHub's anonymous API rate limit on cold caches. Failing here
+# would block the gallery build on transient 403s, so we degrade to a
+# warning and let Astro render with whatever GLBs already exist on disk.
+render_rc=0
+(
+  cd "$CAD_DIR"
+  if command -v nix >/dev/null 2>&1; then
+    nix develop -c ./bin/render
+  else
+    # CRITICAL: when invoked from CI that already has openscad+assimp on
+    # PATH (e.g. inside the web flake's shell with cad tools layered in)
+    # the nix-less fallback keeps the build working.
+    ./bin/render
+  fi
+) || render_rc=$?
+if [ "$render_rc" -ne 0 ]; then
+  echo "[prebuild-cad] WARN: render exited $render_rc; continuing with existing build outputs" >&2
+fi
+
+BUILD_DIR="$CAD_DIR/build"
+shopt -s nullglob
+glbs=("$BUILD_DIR"/*.glb)
+if [ ${#glbs[@]} -eq 0 ]; then
+  echo "[prebuild-cad] WARN: no .glb files produced in $BUILD_DIR" >&2
+  exit 0
+fi
+
+echo "[prebuild-cad] copying ${#glbs[@]} GLB(s) -> $PUBLIC_CAD_DIR"
+for glb in "${glbs[@]}"; do
+  # `cp -u` is idempotent: only overwrites when source is newer.
+  cp -u "$glb" "$PUBLIC_CAD_DIR/"
+done

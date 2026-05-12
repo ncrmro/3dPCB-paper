@@ -17,7 +17,10 @@
 
           packages = [
             pkgs.bun
-            pkgs.nodejs_20
+            # Astro 6 requires Node >= 22.12. Bun is the primary runtime
+            # but `astro check` and a few transitive scripts shell out to
+            # node, so keep a supported one on PATH.
+            pkgs.nodejs_22
             pkgs.git
           ];
 
