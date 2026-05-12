@@ -79,6 +79,12 @@ J1B_X, J1B_Y = J1A_X + 17.78, J1A_Y  # 7 * 2.54 = 17.78mm between Supermini rows
 J2_X,  J2_Y  = ORIGIN_X + 45.0, ORIGIN_Y + 8.0
 J3_X,  J3_Y  = ORIGIN_X + 60.0, ORIGIN_Y + 8.0
 
+# KiCad CCW degrees; 270 puts sensor pads running east from pin 1.
+# After this rotation J2's extent is fx+0 → fx+7.62 mm (4 pins) and
+# J3 is fx+0 → fx+10.16 mm (5 pins). With J2_X=145 and J3_X=160 that
+# leaves a 7.4mm gap between J2's east edge and J3's pin 1.
+SENSOR_ROTATION = 270.0
+
 # Collect unique nets. Net 0 must be "". GND, +3V3, SDA, SCL are the
 # routed nets; everything else (GPIOn, +5V, NC, NC2, ADDR) ends up on
 # its own no-connect net.
@@ -214,12 +220,26 @@ def edge_cuts() -> str:
     return "\n".join(out) + "\n"
 
 
-def footprint(ref: str, value: str, x: float, y: float, pin_net_map: dict[int, str], description: str) -> str:
+def footprint(
+    ref: str,
+    value: str,
+    x: float,
+    y: float,
+    pin_net_map: dict[int, str],
+    description: str,
+    rotation: float = 0.0,
+) -> str:
     """A through-hole pin header footprint.
 
-    Pads are 2.54mm pitch in +y, 1.7mm drill, 1.7mm × 2.4mm oblong on
-    *.Cu and *.Mask. Pin 1 is rectangular (square) to mark orientation,
-    all others are oval.
+    Pads are 2.54mm pitch in +y (footprint local frame), 1.7mm drill,
+    1.7mm × 2.4mm oblong on *.Cu and *.Mask. Pin 1 is rectangular
+    (square) to mark orientation, all others are oval.
+
+    `rotation` (degrees, KiCad CCW convention — positive looks
+    clockwise on the screen because KiCad's Y points down) is
+    embedded in the `(at x y rot)` placement. Pad local positions
+    stay the same; KiCad rotates them on load. Use `find_pad(...,
+    rotation=...)` to compute world-space pad locations for routing.
     """
     fp_uuid = u()
     pin_count = len(pin_net_map)
@@ -283,10 +303,11 @@ def footprint(ref: str, value: str, x: float, y: float, pin_net_map: dict[int, s
         f'\t\t\t(stroke (width 0.05) (type solid)) (layer "F.CrtYd") (uuid "{u()}"))'
     )
 
+    at_block = f"(at {x} {y})" if rotation == 0.0 else f"(at {x} {y} {rotation})"
     return f"""\t(footprint "spike:PinHeader_1x{pin_count:02d}"
 \t\t(layer "F.Cu")
 \t\t(uuid "{fp_uuid}")
-\t\t(at {x} {y})
+\t\t{at_block}
 \t\t(descr "{description}")
 \t\t(tags "pin header through-hole")
 \t\t(property "Reference" "{ref}"
@@ -357,11 +378,27 @@ def via(x: float, y: float, net_name: str) -> str:
     )
 
 
-def find_pad(fp_x: float, fp_y: float, pin_map: dict[int, str], target_net: str) -> tuple[float, float] | None:
-    """Return absolute (x, y) for the first pad on fp wired to target_net."""
+def find_pad(
+    fp_x: float,
+    fp_y: float,
+    pin_map: dict[int, str],
+    target_net: str,
+    rotation: float = 0.0,
+) -> tuple[float, float] | None:
+    """Return absolute (x, y) for the first pad wired to target_net.
+
+    Pad local position is (0, (pin-1)*PITCH). Footprint rotation is
+    applied around the footprint origin before translation; KiCad
+    rotations are math-CCW degrees.
+    """
+    import math
+    theta = math.radians(rotation)
+    cos_t, sin_t = math.cos(theta), math.sin(theta)
     for pin_num, net in pin_map.items():
         if net == target_net:
-            return (fp_x, fp_y + (pin_num - 1) * PITCH)
+            py = (pin_num - 1) * PITCH
+            # local (0, py) → rotated (-py*sin θ, py*cos θ)
+            return (fp_x - py * sin_t, fp_y + py * cos_t)
     return None
 
 
@@ -372,17 +409,22 @@ def main() -> str:
     # Edge cuts.
     out.append(edge_cuts())
 
-    # Three footprints: J1A (left Supermini row), J1B (right Supermini row),
-    # J2 (SCD41), J3 (BH1750). The Supermini is one physical module split
-    # across two female headers, so we use two refs J1A/J1B for clarity.
+    # Four footprints. The Supermini stays at 0° (two-row symmetric
+    # block). The sensor breakouts are rotated 270° (KiCad CCW) so
+    # their pin column runs east instead of south — pin 1 anchors
+    # where it was, pads 2..N extend along +X. This keeps routing on
+    # a single horizontal track at Y=68 and gives the breakouts more
+    # board real estate.
     out.append(footprint("J1A", "ESP32-C3-SuperMini-L", J1A_X, J1A_Y, J1A_PINS,
                          "ESP32-C3 Supermini left header row 1x9 female"))
     out.append(footprint("J1B", "ESP32-C3-SuperMini-R", J1B_X, J1B_Y, J1B_PINS,
                          "ESP32-C3 Supermini right header row 1x9 female"))
     out.append(footprint("J2", "SCD41_Breakout", J2_X, J2_Y, J2_PINS,
-                         "Sensirion SCD41 breakout 1x4 female header"))
+                         "Sensirion SCD41 breakout 1x4 female header",
+                         rotation=SENSOR_ROTATION))
     out.append(footprint("J3", "BH1750_GY302", J3_X, J3_Y, J3_PINS,
-                         "Rohm BH1750 GY-302 breakout 1x5 female header"))
+                         "Rohm BH1750 GY-302 breakout 1x5 female header",
+                         rotation=SENSOR_ROTATION))
 
     # Route the four I2C-bus nets between the four headers.
     # For SDA: J1B pin 1 -> J2 pin 4 -> J3 pin 4 (all on F.Cu).
@@ -401,29 +443,29 @@ def main() -> str:
 
     # SDA route on F.Cu
     j1b_sda = find_pad(J1B_X, J1B_Y, J1B_PINS, "SDA")
-    j2_sda  = find_pad(J2_X,  J2_Y,  J2_PINS,  "SDA")
-    j3_sda  = find_pad(J3_X,  J3_Y,  J3_PINS,  "SDA")
+    j2_sda  = find_pad(J2_X,  J2_Y,  J2_PINS,  "SDA",  rotation=SENSOR_ROTATION)
+    j3_sda  = find_pad(J3_X,  J3_Y,  J3_PINS,  "SDA",  rotation=SENSOR_ROTATION)
     route(j1b_sda, j2_sda, "SDA")
     route(j2_sda,  j3_sda, "SDA")
 
     # SCL route on F.Cu
     j1b_scl = find_pad(J1B_X, J1B_Y, J1B_PINS, "SCL")
-    j2_scl  = find_pad(J2_X,  J2_Y,  J2_PINS,  "SCL")
-    j3_scl  = find_pad(J3_X,  J3_Y,  J3_PINS,  "SCL")
+    j2_scl  = find_pad(J2_X,  J2_Y,  J2_PINS,  "SCL",  rotation=SENSOR_ROTATION)
+    j3_scl  = find_pad(J3_X,  J3_Y,  J3_PINS,  "SCL",  rotation=SENSOR_ROTATION)
     route(j1b_scl, j2_scl, "SCL")
     route(j2_scl,  j3_scl, "SCL")
 
     # +3V3 route on B.Cu (use bottom layer to avoid SDA/SCL crossings)
     j1a_3v3 = find_pad(J1A_X, J1A_Y, J1A_PINS, "+3V3")
-    j2_3v3  = find_pad(J2_X,  J2_Y,  J2_PINS,  "+3V3")
-    j3_3v3  = find_pad(J3_X,  J3_Y,  J3_PINS,  "+3V3")
+    j2_3v3  = find_pad(J2_X,  J2_Y,  J2_PINS,  "+3V3", rotation=SENSOR_ROTATION)
+    j3_3v3  = find_pad(J3_X,  J3_Y,  J3_PINS,  "+3V3", rotation=SENSOR_ROTATION)
     route(j1a_3v3, j2_3v3, "+3V3", layer="B.Cu")
     route(j2_3v3,  j3_3v3, "+3V3", layer="B.Cu")
 
     # GND route on B.Cu
     j1a_gnd = find_pad(J1A_X, J1A_Y, J1A_PINS, "GND")
-    j2_gnd  = find_pad(J2_X,  J2_Y,  J2_PINS,  "GND")
-    j3_gnd  = find_pad(J3_X,  J3_Y,  J3_PINS,  "GND")
+    j2_gnd  = find_pad(J2_X,  J2_Y,  J2_PINS,  "GND", rotation=SENSOR_ROTATION)
+    j3_gnd  = find_pad(J3_X,  J3_Y,  J3_PINS,  "GND", rotation=SENSOR_ROTATION)
     route(j1a_gnd, j2_gnd, "GND", layer="B.Cu")
     route(j2_gnd,  j3_gnd, "GND", layer="B.Cu")
 

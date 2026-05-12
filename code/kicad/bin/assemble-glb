@@ -118,14 +118,15 @@ PLACEMENTS = [
     # version includes the carrier board, and the KiCad PCB itself
     # IS that carrier here. Showing both would stack two boards.
     #
-    # Sensors are authored with the pin row along one edge; on the
-    # spike PCB the pins run vertically (along KiCad +Y) so the
-    # sensor PCB needs a 90° yaw to align its pin row to that axis.
-    # The Supermini is already symmetric across its two-row header
-    # block, so its yaw stays at 0.
+    # Sensors are authored with the pin row along the vitamin's +Y.
+    # gen_spike_pcb.py now rotates the J2/J3 footprints to 270° so
+    # their through-hole pads run east; the vitamin needs a -90° yaw
+    # so its pin-row axis lines up with KiCad +X.
+    # The Supermini is symmetric across its two-row header block, so
+    # its yaw stays at 0.
     ("ESP32", "esp32_c3_supermini", (J1A_X + J1B_X) / 2.0, HEADERS_Y, 9, 0.0),
-    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4, 90.0),
-    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5, 90.0),
+    ("SCD41", "scd41_breakout", J2_X, HEADERS_Y, 4, -90.0),
+    ("BH1750", "bh1750_breakout", J3_X, HEADERS_Y, 5, -90.0),
 ]
 
 
@@ -187,8 +188,18 @@ def main() -> int:
             print(f"  skip {ref} ({name}): {glb_path} not found")
             continue
         vitamin = _load_scene(glb_path)
-        cy_kicad = fy + ((pin_count - 1) * PITCH) / 2.0
-        translation = kicad_to_glb(fx, cy_kicad)
+        # Compute the centroid of the header pin row in KiCad world
+        # coords. yaw_deg encodes the *vitamin's* rotation, which
+        # equals (negative of) the KiCad footprint rotation: the
+        # vitamin's +Y pin-row axis points in the same world
+        # direction as the KiCad footprint's +Y (local) axis.
+        # So the centroid offset goes from pin 1 along that axis by
+        # (pin_count-1)/2 * PITCH.
+        half_span = ((pin_count - 1) * PITCH) / 2.0
+        offset_dir_rad = np.radians(-yaw_deg)  # KiCad footprint angle
+        cx_kicad = fx - half_span * np.sin(offset_dir_rad)
+        cy_kicad = fy + half_span * np.cos(offset_dir_rad)
+        translation = kicad_to_glb(cx_kicad, cy_kicad)
         # Compose: yaw (module frame) → scale (mm → m) → orient (Z-up
         # to Y-up) → translate (to footprint position). Matrix order
         # is the reverse of application order with @.
