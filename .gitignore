@@ -20,6 +20,15 @@ build/
 code/kicad/build/*
 !code/kicad/build/.gitkeep
 
+# Bun workspace artefacts (workspace root hoists deps to code/)
+code/node_modules/
+code/bun.lock
+code/bun.lockb
+
+# Astro build artefacts
+code/web/dist/
+code/web/.astro/
+
 # Nix / direnv
 .direnv/
 .envrc.local
