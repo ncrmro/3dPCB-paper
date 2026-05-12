@@ -58,9 +58,19 @@ for pcb in "${pcbs[@]}"; do
   # only if it was produced.
   cp "${kicad_build}/${base}.glb"     "${out_dir}/${base}.glb"
   cp "${kicad_build}/${base}-iso.png" "${out_dir}/${base}-iso.png"
+  staged_glbs=("${out_dir}/${base}.glb")
   if [[ -f "${kicad_build}/${base}-assembly.glb" ]]; then
     cp "${kicad_build}/${base}-assembly.glb" "${out_dir}/${base}-assembly.glb"
+    staged_glbs+=("${out_dir}/${base}-assembly.glb")
   fi
+
+  # Bake an XYZ axis triad + ground grid into each staged GLB. Same
+  # SketchUp-style coordinate reference the cad cards get; runs in
+  # the cad nix shell because add-axes needs uv + trimesh.
+  echo "prebuild-kicad: baking axes into ${#staged_glbs[@]} GLB(s)"
+  (cd "${code_dir}/cad" && nix develop --command "${web_dir}/bin/add-axes" \
+     "${staged_glbs[@]}") \
+    || echo "prebuild-kicad: WARN: add-axes failed for ${base}" >&2
 done
 
 echo "done: ${#pcbs[@]} board(s) staged under ${out_dir}"

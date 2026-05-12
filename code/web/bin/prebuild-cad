@@ -54,7 +54,16 @@ if [ ${#glbs[@]} -eq 0 ]; then
 fi
 
 echo "[prebuild-cad] copying ${#glbs[@]} GLB(s) -> $PUBLIC_CAD_DIR"
+staged=()
 for glb in "${glbs[@]}"; do
   # `cp -u` is idempotent: only overwrites when source is newer.
   cp -u "$glb" "$PUBLIC_CAD_DIR/"
+  staged+=("$PUBLIC_CAD_DIR/$(basename "$glb")")
 done
+
+# Bake an XYZ axis triad + ground grid into each staged GLB so the
+# gallery cards have a SketchUp-style coordinate reference. add-axes
+# is idempotent (removes prior bake markers before re-adding).
+echo "[prebuild-cad] baking axes into ${#staged[@]} GLB(s)"
+(cd "$CAD_DIR" && nix develop -c "$WEB_DIR/bin/add-axes" "${staged[@]}") \
+  || echo "[prebuild-cad] WARN: add-axes failed; cards will render without axes" >&2
