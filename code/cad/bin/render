@@ -74,7 +74,11 @@ def main() -> int:
 
         shape = factory()
         scad_path = out / f"{name}.scad"
-        scad_path.write_text(ad.render(shape).rendered_shape.code.code)
+        # AnchorSCAD's RenderResult.rendered_shape is a LazyUnion;
+        # dumps() returns the SCAD source as a string. The older
+        # `.code.code` chain in earlier docs/snapshots no longer exists
+        # in the pinned anchorscad-core.
+        scad_path.write_text(ad.render(shape).rendered_shape.dumps())
         print(f"wrote {scad_path}")
 
         entry: dict = {

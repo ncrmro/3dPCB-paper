@@ -4,7 +4,10 @@
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
     flake-utils.url = "github:numtide/flake-utils";
-    cadeng.url = "github:ncrmro/cadeng";
+    # Pinned to a known-good commit so `nix develop` doesn't hit
+    # GitHub's anonymous API rate limit fetching HEAD on cold caches.
+    # Bump as needed; verify with `cd code/cad && nix develop -c ./bin/render`.
+    cadeng.url = "github:ncrmro/cadeng/5d0d3f9251bc3708815a2c559fd5a0b1581b95da";
   };
 
   outputs = { self, nixpkgs, flake-utils, cadeng }:
