@@ -1,0 +1,36 @@
+(kicad_sch
+	(version 20250114)
+	(generator "eeschema")
+	(generator_version "9.0")
+	(uuid "1a1f0b6c-7b3a-4d29-9f0a-3c6c8b9e2f10")
+	(paper "A4")
+	(title_block
+		(title "3dPCB-paper spike — ESP32-C3 + SCD41 + BH1750 I2C")
+		(date "2026-05-12")
+		(rev "0.1")
+		(company "ncrmro")
+		(comment 1 "Four nets: SDA, SCL, +3V3, GND on a shared I2C bus")
+		(comment 2 "J1 ESP32-C3 Supermini (2x1x9 female), J2 SCD41 (1x4), J3 BH1750 (1x5)")
+		(comment 3 "GPIO5 = SDA, GPIO6 = SCL (matches plant-caravan firmware)")
+		(comment 4 "Schematic is a stub — see spike.kicad_pcb for the authored layout")
+	)
+	(lib_symbols
+	)
+	(text "Netlist (documented in PCB; symbols not authored in this stub):\n\n  +3V3  : J1A.3, J2.1, J3.1\n  GND   : J1A.2, J2.2, J3.2\n  SDA   : J1B.1 (GPIO5), J2.4, J3.4\n  SCL   : J1B.2 (GPIO6), J2.3, J3.3\n  ADDR  : J3.5 (BH1750 address select, left floating = 0x23)\n\nMounting: female 0.1\" headers for all three modules.\nSee code/kicad/RESEARCH.md for license-clean asset sourcing."
+		(exclude_from_sim no)
+		(at 25.4 25.4 0)
+		(effects
+			(font
+				(size 1.27 1.27)
+			)
+			(justify left bottom)
+		)
+		(uuid "2f8a1c0d-9b3e-4a7c-bdef-1234567890ab")
+	)
+	(sheet_instances
+		(path "/"
+			(page "1")
+		)
+	)
+	(embedded_fonts no)
+)
