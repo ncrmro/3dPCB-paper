@@ -25,12 +25,14 @@ const placementYamls = import.meta.glob<string>(
   { query: "?raw", import: "default", eager: true },
 );
 
-// PCB GLB presence — also build-time. import.meta.glob over public/
-// gives us the set of GLBs the prebuild step staged; the basenames
-// match the kicad project filename without the .kicad_pcb suffix.
-const kicadGlbs = import.meta.glob(
+// PCB GLB presence — also build-time. `query: '?url'` keeps Vite
+// from trying to parse the GLB binary as JavaScript: we only need
+// the *keys* (paths) of the matched files, the URL values are
+// incidental. Without the query Vite throws "Failed to parse
+// source for import analysis" on every GLB on disk.
+const kicadGlbs = import.meta.glob<string>(
   "../../../public/models/kicad/*.glb",
-  { eager: true },
+  { query: "?url", import: "default", eager: true },
 );
 const presentPcbBasenames = new Set(
   Object.keys(kicadGlbs).map(
