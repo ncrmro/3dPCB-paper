@@ -159,6 +159,16 @@ def main() -> int:
                 print(f"wrote {stl_path}")
                 entry["stl"] = stl_path.relative_to(out).as_posix()
 
+            # WRL (VRML 2.0) preserves OpenSCAD's color() calls as
+            # diffuseColor on Material nodes — KiCad's 3D viewer + the
+            # `pcb export glb` exporter both read WRL component models,
+            # so this is the path that lets us attach AnchorSCAD-built
+            # vitamin meshes to footprints in spike.kicad_pcb.
+            wrl_path = out / f"{name}.wrl"
+            if _run(["openscad", "-o", str(wrl_path), str(scad_path)]):
+                print(f"wrote {wrl_path}")
+                entry["wrl"] = wrl_path.relative_to(out).as_posix()
+
             tmf_path = out / f"{name}.3mf"
             if _run(["openscad", "-o", str(tmf_path), str(scad_path)]):
                 print(f"wrote {tmf_path}")
