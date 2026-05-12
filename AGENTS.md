@@ -11,13 +11,30 @@ declarative artifact. Demonstration target: ESP32-C3 Supermini + SCD41
 
 - `docs/paper.md` — the paper itself; the canonical statement of the
   methodology, claims, and validation protocol.
-- `cad/` — spike CAD package (own `flake.nix`, `pyproject.toml`, `.venv`).
-  - `src/vitamins/` — COTS module models (`esp32.py`, `sensors.py`),
+- `docs/plan.md` — phased plan for the spike CAD compiler.
+- `kicad/` — canonical electrical designs. Each subdirectory is a
+  `.kicad_sch` + `.kicad_pcb` project plus a `placements/` directory
+  of 3D placement sidecars (YAML keyed by reference designator).
+- `cad/` — substrate compiler (own `flake.nix`, `pyproject.toml`, `.venv`).
+  - `src/vitamins/` — COTS module 3D models (`esp32.py`, `sensors.py`),
     copied verbatim from `ncrmro/plant-caravan/hardware/cad/src/vitamins/`
     so changes can be diffed back upstream.
   - `src/registry.py` — part registration for AnchorSCAD shapes / raw SCAD.
   - `bin/render` — renders registered parts to `.scad` under `cad/build/`.
 - `.deepwork/` — DeepWork workflow metadata.
+
+## Workflow: KiCad-first
+
+Electrical designs live in KiCad. The substrate is a **physical embodiment**
+of a KiCad design — a fabricated PCB is a sibling embodiment of the same
+netlist, not a successor. Designers work in KiCad, then author a YAML
+placement sidecar (per reference designator: position, orientation,
+pinned-ness) that the substrate compiler consumes alongside the KiCad
+netlist and footprint pad coordinates.
+
+Inspiration from `circuit-synth/circuit-synth` (pin-by-name component
+access, KiCad symbols as the canonical pad source) is taken without
+adopting it as a runtime dependency. The compiler owns its data model.
 
 ## Dev shell
 
