@@ -1,4 +1,6 @@
 ---
+export const prerender = true;
+
 // Focus route: /model/{project}/{name}/
 //
 // URL-driven slot pattern — clicking a card on the index lands here.
@@ -126,18 +128,23 @@ const kicadCards = kicad.models;
         }
       </section>
 
-      <!-- Downloads. "Open in OpenSCAD / KiCad" is just a file
-           download — the OS opens it in the default handler if the
-           user has the app installed and registered. -->
+      <!-- Downloads. The STL link is a plain `<a download>`; the
+           "Open in OpenSCAD / KiCad" buttons POST to /api/open,
+           which spawns the local app on the server. -->
       <section class="focus-downloads">
         {project === "cad" ? (
           <>
             <a class="dl-btn" href={`/models/cad/${(model as CadModel).name}.stl`} download>
               Download <strong>.stl</strong>
             </a>
-            <a class="dl-btn" href={`/models/cad/${(model as CadModel).name}.scad`} download>
+            <button
+              class="dl-btn"
+              type="button"
+              data-open-tool="openscad"
+              data-open-name={(model as CadModel).name}
+            >
               Open in <strong>OpenSCAD</strong>
-            </a>
+            </button>
           </>
         ) : (
           (() => {
@@ -148,14 +155,49 @@ const kicadCards = kicad.models;
                 <a class="dl-btn" href={`/models/kicad/${kname}.stl`} download>
                   Download <strong>.stl</strong>
                 </a>
-                <a class="dl-btn" href={`/models/kicad/${pcbBase}.kicad_pcb`} download>
+                <button
+                  class="dl-btn"
+                  type="button"
+                  data-open-tool="kicad"
+                  data-open-name={pcbBase}
+                >
                   Open in <strong>KiCad</strong>
-                </a>
+                </button>
               </>
             );
           })()
         )}
       </section>
+
+      <script is:inline>
+        // CRITICAL: dev-mode wiring for the "Open in …" buttons.
+        // POST to /api/open; the server spawns the local app with
+        // the named source file. Same handler covers both projects.
+        document.addEventListener("click", async (ev) => {
+          const btn = ev.target?.closest?.("button[data-open-tool]");
+          if (!btn) return;
+          const original = btn.innerHTML;
+          btn.disabled = true;
+          btn.textContent = "Launching…";
+          try {
+            const res = await fetch("/api/open", {
+              method: "POST",
+              headers: { "Content-Type": "application/json" },
+              body: JSON.stringify({
+                tool: btn.dataset.openTool,
+                name: btn.dataset.openName,
+              }),
+            });
+            btn.textContent = res.ok ? "Launched ✓" : "Failed";
+          } catch (e) {
+            btn.textContent = "Network error";
+          }
+          setTimeout(() => {
+            btn.innerHTML = original;
+            btn.disabled = false;
+          }, 1800);
+        });
+      </script>
 
       <!-- Gallery strip — same cards as `/`, but compact and linking back. -->
       {

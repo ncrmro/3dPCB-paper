@@ -12,6 +12,7 @@
     "prebuild:kicad": "bash bin/prebuild-kicad"
   },
   "dependencies": {
+    "@astrojs/node": "latest",
     "@google/model-viewer": "latest",
     "astro": "latest",
     "yaml": "latest"
