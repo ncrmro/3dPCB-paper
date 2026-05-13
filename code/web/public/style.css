@@ -342,3 +342,19 @@ body {
 }
 .dl-btn:hover { border-color: var(--accent); }
 .dl-btn strong { color: var(--accent-hover); font-weight: 600; }
+
+/* Buttons in .card-downloads should match the anchor styling
+ * so "STL" (download link) and "Open SCAD"/"Open KiCad" (POST
+ * to /api/open) look like a unified group. */
+.card-downloads button {
+  font: inherit;
+  cursor: pointer;
+  color: var(--text);
+  background: transparent;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.card-downloads button:hover { border-color: var(--accent); color: var(--accent-hover); }
+.card-downloads button:disabled { opacity: 0.6; cursor: progress; }
