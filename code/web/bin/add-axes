@@ -36,14 +36,32 @@ import trimesh
 
 
 def _axis_cylinder(direction: str, length: float, color_rgba: tuple) -> trimesh.Trimesh:
+    """Coloured cylinder for one axis of the OpenSCAD-style gnomon.
+
+    Direction labels follow OpenSCAD / AnchorSCAD convention:
+        "x" → +X (right)   red
+        "y" → -Z (back, away from default camera)   green
+        "z" → +Y (up)   blue
+    In OpenSCAD this is X-right / Y-back / Z-up; glTF's native frame
+    is X-right / Y-up / Z-forward, so y and z swap visual meaning.
+    """
     radius = length * 0.008
     cyl = trimesh.creation.cylinder(radius=radius, height=length, sections=12)
+    # trimesh's cylinder() defaults to a height along +Z. Rotate each
+    # axis to its OpenSCAD direction in glTF coords.
     rotations = {
+        # +Z → +X
         "x": trimesh.transformations.rotation_matrix(np.pi / 2.0, [0.0, 1.0, 0.0]),
-        "y": trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0]),
-        "z": np.eye(4),
+        # +Z → -Z (i.e. flip 180°)
+        "y": trimesh.transformations.rotation_matrix(np.pi, [1.0, 0.0, 0.0]),
+        # +Z → +Y
+        "z": trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0]),
     }
-    axis_unit = {"x": [1, 0, 0], "y": [0, 1, 0], "z": [0, 0, 1]}[direction]
+    axis_unit = {
+        "x": [1.0, 0.0, 0.0],   # OpenSCAD X-right
+        "y": [0.0, 0.0, -1.0],  # OpenSCAD Y-back
+        "z": [0.0, 1.0, 0.0],   # OpenSCAD Z-up
+    }[direction]
     cyl.apply_transform(rotations[direction])
     cyl.apply_translation(np.array(axis_unit) * (length / 2.0))
     cyl.visual.face_colors = np.tile(
