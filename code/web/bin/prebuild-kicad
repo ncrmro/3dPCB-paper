@@ -36,6 +36,7 @@ for pcb in "${pcbs[@]}"; do
 
   "${kicad_dir}/bin/render-board" "$pcb" "$kicad_build"
   "${kicad_dir}/bin/render-glb"   "$pcb" "$kicad_build"
+  "${kicad_dir}/bin/render-stl"   "$pcb" "$kicad_build"
 
   # Merge AnchorSCAD vitamin meshes onto a *copy* of the bare PCB
   # GLB so the gallery can show both views (bare board vs. assembled
@@ -55,9 +56,16 @@ for pcb in "${pcbs[@]}"; do
   fi
 
   # Always copy the bare board GLB + iso PNG; copy the assembly GLB
-  # only if it was produced.
+  # only if it was produced. Also stage:
+  #   - .stl for printable / slicer download
+  #   - .kicad_pcb (the source file) so users can click "Open in
+  #     KiCad" — the OS opens it in the local KiCad install.
   cp "${kicad_build}/${base}.glb"     "${out_dir}/${base}.glb"
   cp "${kicad_build}/${base}-iso.png" "${out_dir}/${base}-iso.png"
+  if [[ -f "${kicad_build}/${base}.stl" ]]; then
+    cp "${kicad_build}/${base}.stl" "${out_dir}/${base}.stl"
+  fi
+  cp "$pcb" "${out_dir}/${base}.kicad_pcb"
   staged_glbs=("${out_dir}/${base}.glb")
   if [[ -f "${kicad_build}/${base}-assembly.glb" ]]; then
     cp "${kicad_build}/${base}-assembly.glb" "${out_dir}/${base}-assembly.glb"

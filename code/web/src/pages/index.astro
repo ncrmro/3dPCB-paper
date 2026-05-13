@@ -96,8 +96,8 @@ const placements: Placement[] = Object.values(placementYamls).map(
             </div>
             <div class="screenshot-grid">
               {cardModels.map((m) => (
-                <a class="screenshot-card-link" href={`/model/cad/${m.name}/`}>
-                  <article class="screenshot-card">
+                <article class="screenshot-card">
+                  <a class="screenshot-card-link" href={`/model/cad/${m.name}/`}>
                     <model-viewer
                       src={m.glb}
                       camera-controls
@@ -111,8 +111,13 @@ const placements: Placement[] = Object.values(placementYamls).map(
                       <span class="angle-label">{cad.project}</span>
                       <span>{m.name}</span>
                     </div>
-                  </article>
-                </a>
+                  </a>
+                  <div class="card-downloads">
+                    <a href={`/models/cad/${m.name}.stl`} download>STL</a>
+                    <span class="dot">·</span>
+                    <a href={`/models/cad/${m.name}.scad`} download title="Opens in OpenSCAD if set as the default handler">SCAD</a>
+                  </div>
+                </article>
               ))}
             </div>
           </section>
@@ -159,23 +164,36 @@ const placements: Placement[] = Object.values(placementYamls).map(
             </p>
           ) : (
             <div class="screenshot-grid">
-              {kicadModels.map((m) => (
-                <a class="screenshot-card-link" href={`/model/kicad/${m.name}/`}>
+              {kicadModels.map((m) => {
+                // Strip any -assembly suffix to find the underlying
+                // PCB source (only spike.kicad_pcb exists, not
+                // spike-assembly.kicad_pcb). STL follows the same
+                // {name}.stl pattern; assembly variants don't have
+                // their own STL.
+                const pcbBase = m.name.replace(/-assembly$/, "");
+                return (
                   <article class="screenshot-card">
-                    <model-viewer
-                      src={`/models/kicad/${m.name}.glb`}
-                      alt={m.label ?? m.name}
-                      camera-controls
-                      auto-rotate
-                      style="width: 100%; height: 320px;"
-                    />
-                    <div class="card-footer">
-                      <span class="angle-label">kicad</span>
-                      <span>{m.label ?? m.name}</span>
+                    <a class="screenshot-card-link" href={`/model/kicad/${m.name}/`}>
+                      <model-viewer
+                        src={`/models/kicad/${m.name}.glb`}
+                        alt={m.label ?? m.name}
+                        camera-controls
+                        auto-rotate
+                        style="width: 100%; height: 320px;"
+                      />
+                      <div class="card-footer">
+                        <span class="angle-label">kicad</span>
+                        <span>{m.label ?? m.name}</span>
+                      </div>
+                    </a>
+                    <div class="card-downloads">
+                      <a href={`/models/kicad/${m.name}.stl`} download>STL</a>
+                      <span class="dot">·</span>
+                      <a href={`/models/kicad/${pcbBase}.kicad_pcb`} download title="Opens in KiCad if set as the default handler">KiCad</a>
                     </div>
                   </article>
-                </a>
-              ))}
+                );
+              })}
             </div>
           )
         }

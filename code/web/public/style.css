@@ -297,3 +297,48 @@ body {
 }
 .screenshot-card-link:hover { outline-color: var(--accent); }
 .screenshot-card-link.is-focused { outline-color: var(--accent-hover); }
+
+/* Download links — small per-card and prominent on focus pages. */
+.card-downloads {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  padding: 0.4rem 0.75rem;
+  font-size: 0.85rem;
+  border-top: 1px solid var(--border);
+  background: rgba(0, 0, 0, 0.15);
+}
+.card-downloads a {
+  color: var(--text);
+  text-decoration: none;
+  padding: 0.15rem 0.5rem;
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  transition: border-color 0.15s, color 0.15s;
+}
+.card-downloads a:hover {
+  border-color: var(--accent);
+  color: var(--accent-hover);
+}
+.card-downloads .dot { color: var(--text-muted); }
+
+.focus-downloads {
+  display: flex;
+  gap: 0.75rem;
+  margin: 0 0 2rem;
+  flex-wrap: wrap;
+}
+.dl-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.55rem 1rem;
+  background: var(--bg-card);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  color: var(--text);
+  text-decoration: none;
+  font-size: 0.95rem;
+}
+.dl-btn:hover { border-color: var(--accent); }
+.dl-btn strong { color: var(--accent-hover); font-weight: 600; }
