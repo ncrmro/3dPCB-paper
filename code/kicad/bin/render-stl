@@ -1,0 +1,42 @@
+#!/usr/bin/env bash
+# render-stl — export a .kicad_pcb to STL via kicad-cli.
+#
+# Usage: render-stl PATH/TO/board.kicad_pcb [OUTPUT_DIR]
+#
+# Defaults OUTPUT_DIR to code/kicad/build/ relative to this script.
+# Includes the full stackup (tracks, pads, zones, silkscreen,
+# soldermask) so the STL matches what `render-glb` produces — handy
+# when consumers want a printable physical model.
+
+set -euo pipefail
+
+if [[ $# -lt 1 || $# -gt 2 ]]; then
+  echo "usage: $(basename "$0") PATH/TO/board.kicad_pcb [OUTPUT_DIR]" >&2
+  exit 2
+fi
+
+pcb="$1"
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+default_out="${script_dir}/../build"
+out_dir="${2:-$default_out}"
+
+if [[ ! -f "$pcb" ]]; then
+  echo "error: input not found: $pcb" >&2
+  exit 1
+fi
+
+mkdir -p "$out_dir"
+
+base="$(basename "$pcb" .kicad_pcb)"
+out="${out_dir}/${base}.stl"
+
+kicad-cli pcb export stl "$pcb" -o "$out" \
+  --include-tracks \
+  --include-pads \
+  --include-zones \
+  --include-silkscreen \
+  --include-soldermask \
+  --fuse-shapes \
+  --force
+
+echo "done: ${out}"

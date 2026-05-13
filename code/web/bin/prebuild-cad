@@ -53,12 +53,21 @@ if [ ${#glbs[@]} -eq 0 ]; then
   exit 0
 fi
 
-echo "[prebuild-cad] copying ${#glbs[@]} GLB(s) -> $PUBLIC_CAD_DIR"
+echo "[prebuild-cad] copying ${#glbs[@]} GLB(s) + .stl/.scad downloads -> $PUBLIC_CAD_DIR"
 staged=()
 for glb in "${glbs[@]}"; do
-  # `cp -u` is idempotent: only overwrites when source is newer.
+  base="$(basename "$glb" .glb)"
   cp -u "$glb" "$PUBLIC_CAD_DIR/"
-  staged+=("$PUBLIC_CAD_DIR/$(basename "$glb")")
+  staged+=("$PUBLIC_CAD_DIR/${base}.glb")
+  # Also stage source + STL so gallery cards can offer downloads:
+  # .stl for slicers / printing, .scad to "Open in OpenSCAD" (the OS
+  # opens the file in OpenSCAD when it's the default handler).
+  for ext in stl scad; do
+    src="$BUILD_DIR/${base}.${ext}"
+    if [ -f "$src" ]; then
+      cp -u "$src" "$PUBLIC_CAD_DIR/"
+    fi
+  done
 done
 
 # Bake an XYZ axis triad + ground grid into each staged GLB so the

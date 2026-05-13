@@ -126,6 +126,37 @@ const kicadCards = kicad.models;
         }
       </section>
 
+      <!-- Downloads. "Open in OpenSCAD / KiCad" is just a file
+           download — the OS opens it in the default handler if the
+           user has the app installed and registered. -->
+      <section class="focus-downloads">
+        {project === "cad" ? (
+          <>
+            <a class="dl-btn" href={`/models/cad/${(model as CadModel).name}.stl`} download>
+              Download <strong>.stl</strong>
+            </a>
+            <a class="dl-btn" href={`/models/cad/${(model as CadModel).name}.scad`} download>
+              Open in <strong>OpenSCAD</strong>
+            </a>
+          </>
+        ) : (
+          (() => {
+            const kname = (model as KicadModel).name;
+            const pcbBase = kname.replace(/-assembly$/, "");
+            return (
+              <>
+                <a class="dl-btn" href={`/models/kicad/${kname}.stl`} download>
+                  Download <strong>.stl</strong>
+                </a>
+                <a class="dl-btn" href={`/models/kicad/${pcbBase}.kicad_pcb`} download>
+                  Open in <strong>KiCad</strong>
+                </a>
+              </>
+            );
+          })()
+        )}
+      </section>
+
       <!-- Gallery strip — same cards as `/`, but compact and linking back. -->
       {
         cadCards.length > 0 && (
