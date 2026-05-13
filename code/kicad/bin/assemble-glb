@@ -66,28 +66,18 @@ def kicad_to_glb(fx_mm: float, fy_mm: float, extra_z_mm: float = 0.0) -> np.ndar
     )
 
 
-def anchorscad_orient() -> np.ndarray:
-    """4x4 transform aligning AnchorSCAD's Z-up to glTF's Y-up.
-
-    The vitamins are authored with the breakout PCB's underside (pins)
-    at -Z and the sensor face / component side at +Z. We want pins
-    pointing DOWN into the board's headers in glTF, i.e. -Y. That's a
-    -90° rotation around +X: (x, y, z) → (x, z, -y). The earlier
-    +90° put pins at +Y, which is why every module appeared flipped.
-    """
-    return trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0])
-
-
 def yaw_matrix(deg: float) -> np.ndarray:
-    """Rotation around the AnchorSCAD module's own Z (vertical) axis.
+    """Rotation around the vitamin's vertical axis (glTF +Y).
 
-    Applied in the module's native frame BEFORE `anchorscad_orient`,
-    so the sense matches "spin the breakout PCB around its centre on
-    the workbench". Positive degrees = counter-clockwise looking down
-    the +Z axis (right-hand rule).
+    AnchorSCAD vitamins now ship pre-rotated to glTF Y-up (`code/cad/
+    bin/render` applies the -90° X rotation at GLB write time). So
+    "spin the breakout on the workbench" is a rotation around glTF
+    +Y here, not around the AnchorSCAD +Z it would have been if the
+    vitamin were still in source coords. Positive degrees = CCW
+    looking down +Y (right-hand rule).
     """
     return trimesh.transformations.rotation_matrix(
-        np.radians(deg), [0.0, 0.0, 1.0]
+        np.radians(deg), [0.0, 1.0, 0.0]
     )
 
 
@@ -191,7 +181,9 @@ def main() -> int:
     scene = _load_scene(pcb_path)
     print(f"loaded PCB: {len(scene.geometry)} mesh(es), bbox {scene.bounds.tolist()}")
 
-    orient = anchorscad_orient()
+    # Vitamins now arrive Y-up from `code/cad/bin/render` (it bakes
+    # the AnchorSCAD Z→glTF Y rotation into the GLB), so no
+    # separate orient step here — yaw + scale + translate.
     scale = scale_matrix(MM_TO_M)
 
     for ref, name, fx, fy, pin_count, yaw_deg, pin_row_local_y in PLACEMENTS:
@@ -225,10 +217,10 @@ def main() -> int:
         translation = kicad_to_glb(adjusted_cx_mm, adjusted_cy_mm)
 
         # Step 3: compose transform. Order with @: yaw applies first
-        # (vitamin frame), then scale (mm → m), then orient (Z→Y),
-        # then translate (target placement in glTF metres).
+        # (rotating around the now-vertical glTF +Y), then scale
+        # (mm → m), then translate (target placement in glTF metres).
         node_transform = (
-            translate_matrix(translation) @ orient @ scale @ yaw_matrix(yaw_deg)
+            translate_matrix(translation) @ scale @ yaw_matrix(yaw_deg)
         )
         for geom_name, geom in vitamin.geometry.items():
             scene.add_geometry(

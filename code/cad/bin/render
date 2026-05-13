@@ -115,6 +115,16 @@ def _convert_3mf_to_glb(src: Path, dst: Path) -> bool:
             vertex_colors=np.array(new_colors, dtype=np.uint8),
             process=False,
         )
+
+        # AnchorSCAD / OpenSCAD use Z-up; glTF + <model-viewer> assume
+        # Y-up. Without this rotation the vitamin appears lying on
+        # its side in the gallery. Rotate -90° around +X:
+        # (x, y, z) → (x, z, -y). AnchorSCAD Z (up) → glTF Y (up);
+        # AnchorSCAD Y (back) → glTF -Z (away from camera). Downstream
+        # consumers (the assembler, the gallery) all assume Y-up now.
+        rot = trimesh.transformations.rotation_matrix(-np.pi / 2.0, [1.0, 0.0, 0.0])
+        mesh.apply_transform(rot)
+
         mesh.export(str(dst))
         return True
     except Exception as exc:  # noqa: BLE001 — best-effort
