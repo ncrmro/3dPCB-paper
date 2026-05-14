@@ -6,3 +6,6 @@
 
 # Local fp-info-cache / sym-lib-table autosaves.
 fp-info-cache
+
+# KiCad per-session lock files (e.g. ~spike.kicad_pro.lck).
+*.lck

@@ -38,3 +38,6 @@ code/web/.astro/
 *.swp
 .idea/
 .vscode/
+
+# Claude Code per-machine state
+.claude/

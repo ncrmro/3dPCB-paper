@@ -1,0 +1,7 @@
+# GLB/STL/PNG/kicad_pcb land here from `bin/prebuild-kicad` (which runs
+# `code/kicad/bin/render-{board,glb,stl}` and copies artifacts in). All
+# generated, not source — keep the directory in git so Astro's static copy
+# succeeds on a fresh clone, but ignore everything in it.
+*
+!.gitignore
+!.gitkeep
