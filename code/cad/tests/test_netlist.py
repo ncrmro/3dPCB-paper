@@ -23,6 +23,7 @@ from netlist import (
 )
 from vitamins.esp32 import Esp32C3SuperminiDimensions
 from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT
+from vitamins.oled_ssd1306_pinout import OLED_PINOUT
 from vitamins.sensors import Bh1750Dimensions, Scd41Dimensions
 from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT
 from vitamins.substrate import (
@@ -54,6 +55,11 @@ _ALL_PINOUTS = {
     "J1B": J1B_PINOUT,
     "SCD41": SCD41_PINOUT,
     "BH1750": BH1750_PINOUT,
+    # OLED PINOUT exists but is not yet on PRIMARY_BUS.devices —
+    # the substrate routing code needs an upgrade before we add it.
+    # Listing it here exercises the per-pinout invariants (signal
+    # uniqueness, bus-signal coverage) before the integration step.
+    "OLED": OLED_PINOUT,
 }
 
 
@@ -85,6 +91,23 @@ def test_bus_signals_present_on_every_participant() -> None:
         assert not missing, (
             f"{participant_name} pinout missing bus signals {missing}"
         )
+
+
+def test_oled_pinout_ready_for_primary_bus() -> None:
+    """The OLED PINOUT carries every signal PRIMARY_BUS needs.
+
+    OLED is not yet listed in PRIMARY_BUS.devices because the substrate
+    routing code (`_build_paths_for_net` in substrate.py) hardcodes
+    `net.device_pins[0]` = SCD41 and `[1]` = BH1750. Once that loops
+    over an N-device tuple, OLED can be added to PRIMARY_BUS.devices
+    and this test plus `test_endpoint_coverage` will exercise it.
+    """
+    signals = {p.signal for p in OLED_PINOUT.values() if p.signal}
+    missing = set(PRIMARY_BUS.signals) - signals
+    assert not missing, (
+        f"OLED_PINOUT missing bus signals {missing}; "
+        f"the pinout is not yet a valid bus participant."
+    )
 
 
 @pytest.mark.parametrize("sig", list(PRIMARY_BUS.signals))
