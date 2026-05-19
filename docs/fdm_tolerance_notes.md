@@ -38,20 +38,37 @@ not be passed through any receptacle. Consistent with the
 above: 0.4 mm-nozzle FDM with default elephant's-foot / seam settings
 cannot reliably resolve through-holes below ~0.7–0.8 mm CAD diameter.
 
+## Receptacle test coupon v2 — confirmed result
+
+Coupon re-print with diameters (0.80, 0.95, 1.10, 1.25 mm). PLA,
+default Bambu Studio settings, 0.4 mm nozzle.
+
+| Row CAD diameter | Light through? | Hosyond OLED pin fit? |
+|---|---|---|
+| 0.80 mm | (closed / marginal) | no |
+| 0.95 mm | (closed / marginal) | no |
+| 1.10 mm | (closed / marginal) | no |
+| **1.25 mm** | **yes** | **yes — confirmed fit** |
+
+**Confirmed receptacle diameter for this hardware: 1.25 mm CAD.**
+This is the value used by `Tier1SubstrateDimensions.receptacle_diameter`
+in `code/cad/src/vitamins/substrate.py`. Other validation hardware
+will need to re-run the coupon and adjust.
+
 ## Working assumptions going forward
 
-- **Minimum reliable CAD hole diameter**: ~0.8 mm. Below that, expect
-  the slicer to fill or partially close the hole.
-- **Interference-fit budget**: aim for ~0.6–0.65 mm *printed* bore
-  diameter (so a standard 0.64 mm DuPont pin presses in with grip).
-  Working back through the −0.05 mm shrinkage observation, that's
-  a CAD design of ~0.65–0.7 mm — but the actual printability depends
-  on whether the slicer respects holes that small.
-- **Practical recommendation**: design CAD holes 0.85–1.25 mm and
-  test which one prints to a usable interference fit on YOUR printer.
-  The relationship between CAD and printed dimensions is
-  printer-dependent and slicer-setting-dependent; this coupon is the
-  measurement tool.
+- **Minimum reliable CAD hole diameter**: ~0.8 mm for light-through,
+  ~1.25 mm for accepting a standard 0.64 mm male DuPont pin on the
+  validation hardware. Smaller holes vanish under default slicer
+  settings.
+- **Interference fit at 1.25 mm**: the pin fits but with low grip
+  (most of the interference is taken up by the over-extrusion). For
+  a tighter grip, dial slicer "Hole compensation" or "Elephant's
+  foot compensation" before reducing the CAD diameter.
+- **Practical recommendation**: any new printer needs to re-run the
+  coupon — the relationship between CAD and printed dimensions is
+  printer-dependent and slicer-setting-dependent. The 1.25 mm value
+  is the validation hardware's number, not a universal one.
 
 ## Open questions
 

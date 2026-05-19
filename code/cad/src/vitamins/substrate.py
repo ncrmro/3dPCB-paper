@@ -208,13 +208,14 @@ class Tier1SubstrateDimensions:
     # Smaller than `hole_diameter` so the printed plastic grips by
     # interference fit.
     #
-    # 2026-05-19: the prior 0.6 mm default printed as solid plastic
-    # — slicer / printer closes through-holes that small. The new
-    # default (0.95 mm) sits in the mid-range of the
-    # ReceptacleTestCoupon's bracket; refine to whatever value
-    # printed snugly on your specific printer.
-    # See `docs/fdm_tolerance_notes.md`.
-    receptacle_diameter: float = 0.95
+    # 2026-05-19, confirmed by physical test: the v1 0.50–0.65 mm
+    # range printed as solid plastic; the v2 ReceptacleTestCoupon
+    # (rows at 0.80, 0.95, 1.10, 1.25 mm) confirmed **1.25 mm CAD**
+    # as the smallest diameter that prints open AND takes a Hosyond
+    # SSD1306 OLED's male header pin on the validation hardware
+    # (PLA, default Bambu Studio profile, 0.4 mm nozzle). See
+    # `docs/fdm_tolerance_notes.md` and `docs/paper.md` §5.5.
+    receptacle_diameter: float = 1.25
 
     # OLED mounting features (Tier 2 only). The OLED PCB cantilevers
     # north from the receptacles in J4 and would otherwise rest at
