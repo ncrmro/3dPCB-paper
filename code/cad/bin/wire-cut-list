@@ -1,0 +1,41 @@
+#!/usr/bin/env bash
+# Print a per-net cut list of bare-copper wire lengths needed to wire up
+# the current PRIMARY_BUS routing. Cut length = path length + slack so
+# the assembler has stripping/wrap allowance on both ends.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+exec uv run python <<'PY'
+import math
+import sys
+sys.path.insert(0, "src")
+from netlist import NETS, PRIMARY_BUS
+from vitamins.substrate import _build_paths_for_net
+
+# Per-wire slack budget: 15 mm covers ~7 mm strip + bend on each end.
+SLACK_MM = 15.0
+
+tier_label = "Tier 2" if "OLED" in PRIMARY_BUS.devices else "Tier 1"
+print(f"Wire cut list for {PRIMARY_BUS.name} ({tier_label})")
+print()
+
+header_path = "Path length"
+header_cut = f"Cut length (+{int(SLACK_MM)} mm slack)"
+print(f"{'Net':<5} {header_path:>12}   {header_cut:>26}")
+
+total_path = 0.0
+total_cut = 0
+rows = []
+for sig, net in NETS.items():
+    paths = _build_paths_for_net(net)
+    path_len = sum(p.length_mm() for p in paths)
+    cut_len = int(math.ceil(path_len + SLACK_MM))
+    total_path += path_len
+    total_cut += cut_len
+    rows.append((sig.name, path_len, cut_len))
+
+for name, path_len, cut_len in rows:
+    print(f"{name:<5} {path_len:>9.2f} mm   {cut_len:>23d} mm")
+
+print("-" * 48)
+print(f"{'Total':<5} {total_path:>9.2f} mm   {total_cut:>23d} mm")
+PY
