@@ -71,10 +71,35 @@ class Via:
     diameter: float = 1.5  # 24-AWG passage with 90° bend clearance
 
 
+# Effective bare-wire length consumed by passing a single via vertically.
+# Worst-case (Tier 2) budget: 3 mm substrate + 5 mm OLED pedestal bore +
+# ~2 mm wrap/strip allowance = 10 mm. Tier 1 vias only see substrate
+# thickness (3 mm) + wrap (~2 mm) ≈ 5 mm; using the Tier 2 number on
+# both tiers gives a conservative cut length (always slightly long is
+# fine — trimming is cheap, splicing is not).
+_VIA_WIRE_EXTENT_MM = 10.0
+
+
 @dataclass(frozen=True)
 class SignalPath:
     name: str
     elements: Tuple[Union[WireSegment, Via], ...]
+
+    def length_mm(self, via_z_extent_mm: float = _VIA_WIRE_EXTENT_MM) -> float:
+        """Total bare-wire length needed to realise this path.
+
+        Manhattan sum over axis-aligned `WireSegment`s plus
+        `via_z_extent_mm` for every `Via` (vertical traversal of the
+        substrate and any raised features above it; see
+        `_VIA_WIRE_EXTENT_MM` for the default).
+        """
+        total = 0.0
+        for el in self.elements:
+            if isinstance(el, WireSegment):
+                total += abs(el.end.x - el.start.x) + abs(el.end.y - el.start.y)
+            elif isinstance(el, Via):
+                total += via_z_extent_mm
+        return total
 
 
 # ---------------------------------------------------------------------------
