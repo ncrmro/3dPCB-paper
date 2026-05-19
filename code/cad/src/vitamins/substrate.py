@@ -38,7 +38,7 @@ from typing import List, Tuple, Union
 import anchorscad as ad
 from anchorscad import datatree
 
-from netlist import NETS, I2cSignal, Net, Pin
+from netlist import I2cSignal, Net, Pin
 from vitamins.esp32 import Esp32C3SuperminiDimensions
 from vitamins.sensors import Bh1750Dimensions, Scd41Dimensions
 
@@ -218,9 +218,28 @@ class Tier1SubstrateDimensions:
 @datatree
 class Tier1Substrate(ad.CompositeShape):
     """Flat plate with module pockets, 27 through-holes, and dual-sided
-    branch-merge routing channels for the four I2C bus signals."""
+    branch-merge routing channels for the four I2C bus signals.
+
+    Tier 1: bare-copper wire soldered through every pin's clearance
+    through-hole. No pressure-fit receptacles, no OLED. The substrate
+    routes only the SCD41 + BH1750 devices (see `netlist.TIER1_BUS`).
+
+    Subclasses extend this class with extra holes / additional bus
+    devices via the `_routed_nets()` and `_punch_extra_holes()` hooks;
+    see `Tier2Substrate` below.
+    """
 
     dim: Tier1SubstrateDimensions = field(default_factory=Tier1SubstrateDimensions)
+
+    def _routed_nets(self) -> dict[I2cSignal, Net]:
+        """Which NETS this substrate routes. Tier 1 = SCD41 + BH1750."""
+        from netlist import TIER1_NETS
+        return TIER1_NETS
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        """Hook for subclasses to add extra holes (receptacles, etc.).
+        Tier 1 has no extras."""
+        pass
 
     def build(self) -> ad.Maker:
         d = self.dim
@@ -235,22 +254,10 @@ class Tier1Substrate(ad.CompositeShape):
 
         # ---- module pin through-holes ---------------------------------
         hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
-        receptacle = ad.Cylinder(
-            r=d.receptacle_diameter / 2, h=d.thickness + 0.4
-        )
 
         def punch_hole(pt: Point2D, name: str) -> None:
             shape.add_at(
                 hole.hole(name).at("centre"),
-                post=ad.translate([pt.x, pt.y, 0]),
-            )
-
-        def punch_receptacle(pt: Point2D, name: str) -> None:
-            """OLED-only pressure-fit pocket: a slightly-undersized
-            cylindrical hole so the printed plastic grips the pin by
-            interference fit instead of clearing it."""
-            shape.add_at(
-                receptacle.hole(name).at("centre"),
                 post=ad.translate([pt.x, pt.y, 0]),
             )
 
@@ -261,13 +268,9 @@ class Tier1Substrate(ad.CompositeShape):
             punch_hole(_sensor_pin(_J2_X, _J2_Y, i + 1), f"j2_{i + 1}")
         for i in range(5):
             punch_hole(_sensor_pin(_J3_X, _J3_Y, i + 1), f"j3_{i + 1}")
-        # OLED header — 4 pressure-fit receptacles south of the
-        # module pockets. These are the *only* receptacles on the
-        # substrate; every other pin position is a plain through-hole.
-        for i in range(4):
-            punch_receptacle(
-                _sensor_pin(_J4_X, _J4_Y, i + 1), f"j4_{i + 1}"
-            )
+
+        # Subclass extension point (e.g. OLED receptacles).
+        self._punch_extra_holes(shape, d)
 
         # ---- module pockets -------------------------------------------
         def punch_pocket(cx: float, cy: float, w: float, h: float,
@@ -331,7 +334,7 @@ class Tier1Substrate(ad.CompositeShape):
 
         seg_idx = 0
         via_idx = 0
-        for net in NETS.values():
+        for net in self._routed_nets().values():
             for path in _build_paths_for_net(net):
                 for elem in path.elements:
                     if isinstance(elem, WireSegment):
@@ -342,3 +345,40 @@ class Tier1Substrate(ad.CompositeShape):
                         via_idx += 1
 
         return shape
+
+
+@ad.shape
+@datatree
+class Tier2Substrate(Tier1Substrate):
+    """Tier 1 substrate + Hosyond SSD1306 OLED on 4 pressure-fit female
+    receptacles south of the existing module pockets.
+
+    Everything in `Tier1Substrate` is inherited unchanged: same outline,
+    same 3 module pockets, same 27 module pin through-holes, same
+    bare-copper routing topology. Tier 2 *adds*:
+
+    - 4 receptacle holes at the OLED's J4 pin positions (y=-22), sized
+      `dim.receptacle_diameter` for interference fit on a DuPont pin
+      instead of the standard `dim.hole_diameter` clearance.
+    - OLED participation on the I2C bus (routing extends to include the
+      OLED via `netlist.TIER2_NETS`).
+
+    The OLED PCB cantilevers south off the substrate; its xy footprint
+    is disjoint from the BH1750's so the light sensor's upward field
+    of view is clear.
+    """
+
+    def _routed_nets(self) -> dict[I2cSignal, Net]:
+        from netlist import TIER2_NETS
+        return TIER2_NETS
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        receptacle = ad.Cylinder(
+            r=d.receptacle_diameter / 2, h=d.thickness + 0.4
+        )
+        for i in range(4):
+            pt = _sensor_pin(_J4_X, _J4_Y, i + 1)
+            shape.add_at(
+                receptacle.hole(f"j4_{i + 1}").at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )

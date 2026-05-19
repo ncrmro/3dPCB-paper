@@ -109,13 +109,27 @@ class Net:
 # ---------------------------------------------------------------------------
 
 
-PRIMARY_BUS = Bus(
-    name="primary_i2c",
+TIER1_BUS = Bus(
+    name="tier1_i2c",
+    signals=(I2cSignal.VCC, I2cSignal.GND, I2cSignal.SCL, I2cSignal.SDA),
+    master="ESP32",
+    master_columns=("J1A", "J1B"),
+    devices=("SCD41", "BH1750"),
+)
+
+TIER2_BUS = Bus(
+    name="tier2_i2c",
     signals=(I2cSignal.VCC, I2cSignal.GND, I2cSignal.SCL, I2cSignal.SDA),
     master="ESP32",
     master_columns=("J1A", "J1B"),
     devices=("SCD41", "BH1750", "OLED"),
 )
+
+# PRIMARY_BUS is the latest fully-routed bus (currently Tier 2). Tests
+# and the KiCad sibling consume PRIMARY_BUS / NETS to validate the
+# current target design; the substrate classes pick their bus
+# explicitly so each tier renders only its own devices.
+PRIMARY_BUS = TIER2_BUS
 
 
 ROUTING: dict[I2cSignal, RoutingHint] = {
@@ -202,39 +216,46 @@ def _assemble_nets(
     return nets
 
 
-# `NETS` is assembled lazily on first access via module `__getattr__`.
-# Eager assembly here would create a circular import: this module is
-# imported by vitamins.esp32 / vitamins.sensors at their top (to access
-# I2cSignal and Pin), so if we tried to import their PINOUTs back here
-# at netlist load time, vitamins.esp32 would still be mid-import when
-# the chain re-enters it. Lazy resolution sidesteps that cleanly.
-_NETS_CACHE: Optional[dict[I2cSignal, Net]] = None
+# Per-bus NETS are assembled lazily on first access via module
+# `__getattr__`. Eager assembly here would create a circular import:
+# this module is imported by vitamins.esp32 / vitamins.sensors at their
+# top (to access I2cSignal and Pin), so if we tried to import their
+# PINOUTs back here at netlist load time, vitamins.esp32 would still
+# be mid-import when the chain re-enters it. Lazy resolution sidesteps
+# that cleanly.
+_NETS_CACHE: dict[str, dict[I2cSignal, Net]] = {}
 
 
-def _build_nets() -> dict[I2cSignal, Net]:
+def _build_nets_for(bus: Bus) -> dict[I2cSignal, Net]:
     # Import the pure-data PINOUT siblings — they don't pull anchorscad,
     # so this works in both the cad and KiCad flake Python envs.
     from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT  # noqa: E402
     from vitamins.oled_ssd1306_pinout import OLED_PINOUT  # noqa: E402
     from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT  # noqa: E402
 
+    pinouts = {
+        "SCD41": SCD41_PINOUT,
+        "BH1750": BH1750_PINOUT,
+        "OLED": OLED_PINOUT,
+    }
     return _assemble_nets(
-        bus=PRIMARY_BUS,
+        bus=bus,
         routing=ROUTING,
         master_columns={"J1A": J1A_PINOUT, "J1B": J1B_PINOUT},
-        devices={
-            "SCD41": SCD41_PINOUT,
-            "BH1750": BH1750_PINOUT,
-            "OLED": OLED_PINOUT,
-        },
+        devices={name: pinouts[name] for name in bus.devices},
     )
 
 
 def __getattr__(name: str):
-    """Lazy module attributes — currently just `NETS`."""
-    global _NETS_CACHE
-    if name == "NETS":
-        if _NETS_CACHE is None:
-            _NETS_CACHE = _build_nets()
-        return _NETS_CACHE
+    """Lazy module attributes — `NETS`, `TIER1_NETS`, `TIER2_NETS`."""
+    bus_for_name = {
+        "NETS": PRIMARY_BUS,         # alias for current PRIMARY_BUS
+        "TIER1_NETS": TIER1_BUS,
+        "TIER2_NETS": TIER2_BUS,
+    }
+    if name in bus_for_name:
+        bus = bus_for_name[name]
+        if bus.name not in _NETS_CACHE:
+            _NETS_CACHE[bus.name] = _build_nets_for(bus)
+        return _NETS_CACHE[bus.name]
     raise AttributeError(f"module 'netlist' has no attribute {name!r}")
