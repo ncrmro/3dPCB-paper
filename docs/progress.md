@@ -120,6 +120,23 @@ two things at once with minimal new surface area:
   modules: unchanged. Only the OLED's footprint + 4 receptacle
   positions are new geometry.
 
+### Status (2026-05-19)
+
+Tier 2 implementation has begun on `feat/tier2-oled-receptacles`:
+
+- **Landed**: `code/cad/src/vitamins/oled_ssd1306_pinout.py` declares
+  `OLED_PINOUT` with the Hosyond SSD1306's `GND, VCC, SCL, SDA`
+  silkscreen order. Two new tests
+  (`test_oled_pinout_ready_for_primary_bus`,
+  OLED added to the `test_pinout_signal_uniqueness` sweep) confirm
+  the pinout exposes every bus signal exactly once.
+- **Not yet landed**: substrate geometry update for the receptacles
+  + OLED pocket, `PRIMARY_BUS.devices` extension to include OLED,
+  refactor of `_build_paths_for_net` to loop over an N-element
+  `device_pins` instead of indexing `[0]` and `[1]`,
+  `OledSsd1306Dimensions` class, `netlist_audit.md` entry for the
+  Hosyond breakout.
+
 ### File-level shape (not yet implemented)
 
 - `code/cad/src/vitamins/oled_ssd1306.py` — new
