@@ -4,11 +4,14 @@ Answers the question the user asked: does each wire actually reach every
 declared endpoint, AND does no wire overlap another wire / foreign pin /
 module pocket? Pure Cartesian math on the `WireSegment` / `Via` /
 `Point2D` data the substrate already produces.
+
+Collision helpers (segment/via bbox math, pocket footprints,
+through-hole enumeration) live in `router.collisions` so the optimiser
+and the test gate share one implementation.
 """
 
 from __future__ import annotations
 
-import math
 from collections import defaultdict, deque
 from typing import Iterable
 
@@ -18,28 +21,25 @@ from netlist import (
     NETS,
     PRIMARY_BUS,
     I2cSignal,
-    Net,
     Pin,
 )
-from vitamins.esp32 import Esp32C3SuperminiDimensions
+from router.collisions import (
+    all_through_holes,
+    module_pocket_bboxes,
+    net_pin_keys,
+    pin_key as _key,
+    segment_pierces_hole,
+    segments_collide,
+    via_in_pocket,
+    via_overlaps_hole,
+)
 from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT
 from vitamins.oled_ssd1306_pinout import OLED_PINOUT
-from vitamins.sensors import Bh1750Dimensions, Scd41Dimensions
 from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT
 from vitamins.substrate import (
-    Point2D,
     Tier1SubstrateDimensions,
     Via,
     WireSegment,
-    _J1A_X,
-    _J1A_Y,
-    _J1B_X,
-    _J1B_Y,
-    _J2_X,
-    _J2_Y,
-    _J3_X,
-    _J3_Y,
-    _PITCH,
     _build_paths_for_net,
     _pin_position,
 )
@@ -128,11 +128,6 @@ def test_net_signal_agreement(sig: I2cSignal) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _key(p: Point2D) -> tuple[float, float]:
-    """Hash-stable node key (rounds away float jitter)."""
-    return (round(p.x, 4), round(p.y, 4))
-
-
 def _build_graph(elements: Iterable) -> dict[tuple[float, float], set[tuple[float, float]]]:
     """Adjacency graph: segments add edges; vias add no edges but their
     `position` is implicitly a shared node across both layers because
@@ -216,80 +211,6 @@ def test_no_dangling_segments(sig: I2cSignal) -> None:
 # ---------------------------------------------------------------------------
 
 
-def _segment_bbox(seg: WireSegment, cw: float) -> tuple[float, float, float, float]:
-    """Axis-aligned bbox of a 0.8mm-wide channel around the centreline.
-    Returns (xmin, xmax, ymin, ymax). The bbox is INCLUSIVE-EXCLUSIVE in
-    spirit but we use strict overlap (> 0 area)."""
-    half = cw / 2
-    return (
-        min(seg.start.x, seg.end.x) - half,
-        max(seg.start.x, seg.end.x) + half,
-        min(seg.start.y, seg.end.y) - half,
-        max(seg.start.y, seg.end.y) + half,
-    )
-
-
-def _bboxes_overlap(a, b, eps: float = 1e-6) -> bool:
-    """True iff axis-aligned bboxes share area beyond `eps` slack
-    (avoids flagging T-junctions where two same-net bboxes touch at an
-    edge as 'overlapping')."""
-    ax0, ax1, ay0, ay1 = a
-    bx0, bx1, by0, by1 = b
-    return (
-        ax1 - eps > bx0
-        and bx1 - eps > ax0
-        and ay1 - eps > by0
-        and by1 - eps > ay0
-    )
-
-
-def _module_pocket_bboxes(
-    dim: Tier1SubstrateDimensions,
-) -> dict[str, tuple[float, float, float, float]]:
-    """Pocket footprints in board-local (x, y) coords, matching the
-    geometry built inside Tier1Substrate.build()."""
-    esp_cx = (_J1A_X + _J1B_X) / 2
-    esp_cy = _J1A_Y + 4 * _PITCH
-    esp_w = dim.esp32.width + dim.pocket_clearance
-    esp_h = dim.esp32.length + dim.pocket_clearance
-
-    scd_cx = _J2_X + 1.5 * _PITCH
-    scd_cy = _J2_Y + dim.scd41.depth / 2 - dim.scd41.header_body_width / 2
-    scd_w = dim.scd41.width + dim.pocket_clearance
-    scd_h = dim.scd41.depth + dim.pocket_clearance
-
-    bh_cx = _J3_X + 2.0 * _PITCH
-    bh_cy = _J3_Y + dim.bh1750.depth / 2 - dim.bh1750.header_body_width / 2
-    bh_w = dim.bh1750.width + dim.pocket_clearance
-    bh_h = dim.bh1750.depth + dim.pocket_clearance
-
-    return {
-        "ESP32": (esp_cx - esp_w / 2, esp_cx + esp_w / 2,
-                  esp_cy - esp_h / 2, esp_cy + esp_h / 2),
-        "SCD41": (scd_cx - scd_w / 2, scd_cx + scd_w / 2,
-                  scd_cy - scd_h / 2, scd_cy + scd_h / 2),
-        "BH1750": (bh_cx - bh_w / 2, bh_cx + bh_w / 2,
-                   bh_cy - bh_h / 2, bh_cy + bh_h / 2),
-    }
-
-
-def _all_through_holes() -> list[tuple[Pin, Point2D]]:
-    """Every (Pin, position) on the spike outline."""
-    out: list[tuple[Pin, Point2D]] = []
-    for pinout in (J1A_PINOUT, J1B_PINOUT, SCD41_PINOUT, BH1750_PINOUT):
-        for pin in pinout.values():
-            out.append((pin, _pin_position(pin)))
-    return out
-
-
-def _net_pin_keys(net: Net) -> set[tuple[float, float]]:
-    """Keys of all pins that ARE this net's endpoints."""
-    pts = [_pin_position(net.master_pin)] + [
-        _pin_position(p) for p in net.device_pins
-    ]
-    return {_key(p) for p in pts}
-
-
 # Build a single shared snapshot of every segment + via, tagged with net.
 def _all_routed_elements() -> list[tuple[I2cSignal, object]]:
     out: list[tuple[I2cSignal, object]] = []
@@ -318,12 +239,7 @@ def test_no_same_layer_wire_overlap() -> None:
                 continue
             if sig_a == sig_b:
                 continue
-            if el_a.layer != el_b.layer:
-                continue
-            if _bboxes_overlap(
-                _segment_bbox(el_a, _CW),
-                _segment_bbox(el_b, _CW),
-            ):
+            if segments_collide(el_a, el_b, _CW):
                 failures.append(
                     f"{sig_a.name} ↔ {sig_b.name} on L{el_a.layer}: "
                     f"{el_a.start}-{el_a.end} overlaps {el_b.start}-{el_b.end}"
@@ -336,23 +252,18 @@ def test_no_trunk_through_foreign_pin() -> None:
     its net's endpoints. The hole pierces every layer, so this is a
     layer-agnostic check."""
     elements = _all_routed_elements()
-    holes = _all_through_holes()
+    # The OLED's J4 pins are foreign-pin candidates on every other net,
+    # so include them in the foreign-hole sweep on PRIMARY_BUS (Tier 2).
+    holes = all_through_holes(include_oled=True)
     failures: list[str] = []
     for sig, el in elements:
         if not isinstance(el, WireSegment):
             continue
-        endpoints = _net_pin_keys(NETS[sig])
-        bbox = _segment_bbox(el, _CW)
+        endpoints = net_pin_keys(NETS[sig])
         for pin, pos in holes:
             if _key(pos) in endpoints:
                 continue
-            # Hole as a disk → bounding box expansion is sufficient
-            # since the channel/disk approximation has matched shapes.
-            hole_bbox = (
-                pos.x - _HOLE_R, pos.x + _HOLE_R,
-                pos.y - _HOLE_R, pos.y + _HOLE_R,
-            )
-            if _bboxes_overlap(bbox, hole_bbox):
+            if segment_pierces_hole(el, pos, _CW, _HOLE_R):
                 failures.append(
                     f"{sig.name} L{el.layer} segment {el.start}-{el.end} "
                     f"pierces {pin.ref}.{pin.number} hole at {pos}"
@@ -363,19 +274,16 @@ def test_no_trunk_through_foreign_pin() -> None:
 def test_no_via_in_pocket() -> None:
     """No Via lands inside a module pocket footprint."""
     elements = _all_routed_elements()
-    pockets = _module_pocket_bboxes(_DIM)
+    pockets = module_pocket_bboxes(_DIM)
     failures: list[str] = []
     for sig, el in elements:
         if not isinstance(el, Via):
             continue
-        for module_name, (x0, x1, y0, y1) in pockets.items():
-            r = _VIA_R
-            via_bbox = (el.position.x - r, el.position.x + r,
-                        el.position.y - r, el.position.y + r)
-            if _bboxes_overlap(via_bbox, (x0, x1, y0, y1)):
+        for module_name, pocket in pockets.items():
+            if via_in_pocket(el, pocket, _VIA_R):
                 failures.append(
                     f"{sig.name} via at {el.position} overlaps "
-                    f"{module_name} pocket {(x0, x1, y0, y1)}"
+                    f"{module_name} pocket {pocket}"
                 )
     assert not failures, "Via-in-pocket collisions:\n  " + "\n  ".join(failures)
 
@@ -383,19 +291,16 @@ def test_no_via_in_pocket() -> None:
 def test_no_via_on_foreign_pin() -> None:
     """No Via lands on a through-hole belonging to a foreign net."""
     elements = _all_routed_elements()
-    holes = _all_through_holes()
+    holes = all_through_holes(include_oled=True)
     failures: list[str] = []
     for sig, el in elements:
         if not isinstance(el, Via):
             continue
-        endpoints = _net_pin_keys(NETS[sig])
-        min_sep = _VIA_R + _HOLE_R
+        endpoints = net_pin_keys(NETS[sig])
         for pin, pos in holes:
             if _key(pos) in endpoints:
                 continue
-            dx = el.position.x - pos.x
-            dy = el.position.y - pos.y
-            if math.hypot(dx, dy) < min_sep:
+            if via_overlaps_hole(el, pos, _VIA_R, _HOLE_R):
                 failures.append(
                     f"{sig.name} via at {el.position} too close to "
                     f"{pin.ref}.{pin.number} at {pos}"
