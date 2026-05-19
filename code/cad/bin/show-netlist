@@ -49,7 +49,9 @@ for sig, net in NETS.items():
         print(f"  device  {dp.ref}.{dp.number:<2}  ({pos.x:>7.2f}, {pos.y:>7.2f})  {ok}")
     n_segs = sum(1 for e in elements if isinstance(e, WireSegment))
     n_vias = sum(1 for e in elements if isinstance(e, Via))
+    length = sum(p.length_mm() for p in paths)
     print(f"  layout  L1+L2  segs={n_segs}  vias={n_vias}  "
           f"corridor_y={net.corridor_y}  north_x={net.north_x}")
+    print(f"  wire    {length:6.2f} mm (Manhattan segs + via vertical traversal)")
     print()
 '
