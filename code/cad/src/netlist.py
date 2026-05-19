@@ -135,12 +135,12 @@ PRIMARY_BUS = TIER2_BUS
 ROUTING: dict[I2cSignal, RoutingHint] = {
     I2cSignal.VCC: RoutingHint(north_x=-29.0, corridor_y=6.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
-    I2cSignal.GND: RoutingHint(north_x=-27.0, corridor_y=9.0,
+    I2cSignal.GND: RoutingHint(north_x=-28.0, corridor_y=7.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
-    I2cSignal.SCL: RoutingHint(north_x=-11.0, corridor_y=12.0,
+    I2cSignal.SCL: RoutingHint(north_x=-11.0, corridor_y=8.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
-    I2cSignal.SDA: RoutingHint(north_x=-9.0,  corridor_y=15.0,
-                               scd_east_on_l2=False, branch_east_on_l2=True),
+    I2cSignal.SDA: RoutingHint(north_x=-10.0, corridor_y=9.0,
+                               scd_east_on_l2=False, branch_east_on_l2=False),
 }
 
 
