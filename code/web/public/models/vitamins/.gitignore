@@ -1,0 +1,6 @@
+# GLB + source STEP land here from `bin/prebuild-vitamins` (which calls
+# `code/cad/bin/step-to-glb` on each entry in src/manifest.vitamins.yaml).
+# Generated, not source — keep the directory tracked but ignore the
+# artifacts.
+*
+!.gitignore

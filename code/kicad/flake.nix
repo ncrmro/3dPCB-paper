@@ -17,6 +17,7 @@
 
           packages = [
             pkgs.kicad
+            pkgs.kicad.libraries.packages3d
             pkgs.git
           ];
 
@@ -25,7 +26,11 @@
             # meshes via KICAD9_3DMODEL_DIR. Without this, board geometry
             # still renders but every footprint with a 3D model logs a
             # missing-mesh warning and the GLB export omits parts.
-            export KICAD9_3DMODEL_DIR="${pkgs.kicad}/share/kicad/3dmodels"
+            # WHY libraries.packages3d: the bundled pkgs.kicad ships no
+            # 3dmodels by default; the separate derivation provides the
+            # full Connector_PinSocket / PinHeader meshes referenced from
+            # spike.kicad_pcb (CC-BY-SA 4.0 + KiCad library exception).
+            export KICAD9_3DMODEL_DIR="${pkgs.kicad.libraries.packages3d}/share/kicad/3dmodels"
 
             echo "3dPCB-paper KiCad dev shell ready."
             echo "  kicad             — open the GUI"

@@ -1,0 +1,29 @@
+# Third-party 3D model gallery manifest.
+#
+# Each entry maps to one folder under `data/models/`. `bin/prebuild-vitamins`
+# converts the STEP/STP source to GLB and stages it as
+# `public/models/vitamins/{name}.glb`. The source STEP is staged alongside
+# for download (and is gitignored at rest when the upstream license bars
+# redistribution — see data/models/<folder>/ATTRIBUTION.md).
+
+project: vitamins
+
+cameras:
+  iso: "55deg 75deg 200mm"
+
+models:
+  - name: scd40_breakout
+    label: "Adafruit STEMMA QT 5187/5190 (SCD-40 / SCD-41)"
+    source: data/models/scd40_breakout/scd40_breakout.step
+    license: MIT
+    camera: iso
+  - name: bh1750_breakout
+    label: "GY-302 BH1750 breakout"
+    source: data/models/bh1750_breakout/BH1750.step
+    license: GrabCAD ToS
+    camera: iso
+  - name: esp32_c3_supermini
+    label: "ESP32-C3 SuperMini"
+    source: data/models/esp32_c3_supermini/ESP32-C3-SuperMini.stp
+    license: unstated
+    camera: iso

@@ -35,6 +35,13 @@
             # STL -> GLB conversion for the Astro <model-viewer> gallery.
             pkgs.assimp
 
+            # STEP tessellation for third-party CAD vitamins under
+            # data/models/. We use FreeCADCmd (headless) to read STEP
+            # and emit STL, then trimesh (already a Python dep) to
+            # write GLB. assimp's STEP importer is IFC-only and won't
+            # read mechanical AP203/AP214 STEPs.
+            pkgs.freecad
+
             # Build dependencies for Python packages
             pkgs.stdenv.cc.cc.lib
             pkgs.zlib

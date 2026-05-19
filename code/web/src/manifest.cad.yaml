@@ -35,3 +35,6 @@ models:
   - name: esp32_c3_assembly
     glb: /models/cad/esp32_c3_assembly.glb
     camera: iso
+  - name: tier1_substrate
+    glb: /models/cad/tier1_substrate.glb
+    camera: top

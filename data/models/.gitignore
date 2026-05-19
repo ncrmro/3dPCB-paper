@@ -1,0 +1,4 @@
+# Fetched, non-redistributable third-party 3D models.
+# See README.md for the per-file source and license rationale.
+esp32_c3_supermini/ESP32-C3-SuperMini.stp
+bh1750_breakout/BH1750.step

@@ -1,0 +1,340 @@
+name: printable_pcb
+summary: "Design a 3D-printed PCB substrate (Tier 1): modules + pin-by-pin net list → AnchorSCAD plan, with a routing-collision gate."
+
+step_arguments:
+  - name: design_brief
+    description: "Free-form description of the new substrate: which modules to mount, the per-pin net list, board outline, and constraints (layer budget, no-via zones, mounting holes)."
+    type: string
+
+  - name: board_name
+    description: "Short snake_case identifier for this substrate. Becomes the folder under printable_pcb/."
+    type: string
+
+  - name: substrate_plan.md
+    description: "Substrate plan: outline + modules + per-pin net list + pocket geometry + through-hole positions + per-net routing topology (layer, segments, vias) + risks-to-validate."
+    type: file_path
+    review:
+      strategy: individual
+      instructions: |
+        Read substrate_plan.md and verify it is a complete, mechanically-checkable
+        plan — not a sketch. The next step (check_routing) treats this file as
+        ground truth, so any missing section silently weakens the gate.
+
+        Evaluate against these criteria:
+
+        - Section completeness: all nine sections from the draft_plan instructions
+          are present in order:
+            (1) Board identity, (2) Modules, (3) Net list, (4) Pocket layout,
+            (5) Through-hole list, (6) Per-net routing, (7) Layer rationale,
+            (8) Risks-to-validate, (9) Open questions.
+          A missing section (even Open questions — empty is fine, absent is not)
+          is a FAIL.
+
+        - Net-list / through-hole coverage parity: every (module, pin) listed
+          under Through-hole list MUST appear as an endpoint of exactly one net
+          in Net list, and every net endpoint MUST have a matching through-hole
+          row. Cross-tabulate before passing — partial coverage means downstream
+          collision checks miss pins that physically exist.
+
+        - Per-net routing tuples: every net's trunk is given as an ordered list
+          of (start, end, layer) segments with numeric coordinates, not prose
+          ("runs east then down" fails this).
+
+        - Machine-readable YAML routing block per net: for every net listed
+          in section 3 (Net list) that has more than one endpoint, section 6
+          MUST include a fenced ```yaml ... ``` block with `net`, `segments`,
+          and (optional) `vias` keys. Coordinates in the YAML block MUST agree
+          numerically with the prose subsection for the same net. Singleton
+          nets (one endpoint, no copper run) MAY omit the YAML block.
+
+        - KiCad sibling reference: if the brief or board identity names a KiCad
+          sibling, the file path AND a commit-or-file reference is present in
+          section (1). If no sibling exists, section (1) explicitly says so.
+
+        - Risks-to-validate explicit failure modes: section (8) MUST explicitly
+          enumerate each of the four known failure modes from
+          common_job_info_provided_to_all_steps_at_runtime that applies to this
+          board (trunk-through-foreign-pin, same-layer parallel, via-in-pocket,
+          edge-of-board escape impossible) — either listing a specific instance
+          to check OR stating why the failure mode cannot apply to this board
+          (e.g., "single-layer plan, so via-in-pocket cannot occur").
+
+        - Open questions discipline: any unspecified parameter that the draft
+          defaulted (clearances, layer counts, hole diameters, etc.) MUST be
+          listed under (9) Open questions, not silently chosen.
+
+  - name: routing_check.md
+    description: "Per-net validation report. Enumerates each trunk segment and lists collisions (foreign pin, same-layer crossing, pocket overlap, edge escape). Honest verdict — overall PASS only if every per-net verdict is PASS."
+    type: file_path
+    review:
+      strategy: matches_together
+      instructions: |
+        Read substrate_plan.md alongside routing_check.md to verify the check
+        actually validated the plan rather than restated it.
+
+        Evaluate against these criteria:
+        - Per-net coverage: every net in substrate_plan.md's net list appears
+          in routing_check.md with a recorded per-net verdict.
+        - Trunk enumeration: each net's path is broken into an ordered list
+          of (layer, x_start, y_start, x_end, y_end) tuples — not prose.
+        - Foreign-pin collision check: for every segment, the report explicitly
+          lists the foreign through-hole positions (x, y, owning_pin) that lie
+          within the segment's bounding box on the segment's layer. If none,
+          the report says so per-segment, not just once at the top.
+        - Same-layer crossing check: every pair of same-layer segments is
+          either flagged as intersecting or explicitly declared disjoint.
+        - Pocket overlap check: every via and every top-layer segment is
+          checked against every module pocket footprint.
+        - Verdict honesty: if any per-net verdict is FAIL, overall verdict
+          MUST be FAIL. The report MUST NOT round up.
+        - Remediation neutrality: when FAIL, the report diagnoses but does
+          NOT silently mutate the plan; it lists candidate remediations for
+          the user to choose from.
+
+workflows:
+  single_plan:
+    summary: "Produce one substrate plan from a design brief and run the routing-collision gate."
+    common_job_info_provided_to_all_steps_at_runtime: |
+      ## What this workflow does
+
+      The 3dPCB-paper project demonstrates 3D-printed substrates as physical
+      siblings of KiCad PCBs (see docs/goals.md, Tier 1). A Tier 1 substrate
+      is a single flat plate with:
+      - Inlay pockets for each module (ESP32, sensors, etc.)
+      - Through-holes at every module pin
+      - Surface channels carrying bare copper wire between same-net pins
+      - Optional vias when channels need to switch layers
+
+      The substrate must:
+      - Match its KiCad sibling exactly: same outline, same module placements,
+        same per-pin net assignment (code/kicad/gen_spike_pcb.py is the
+        reference example for the existing spike board)
+      - Be printable on a stock FDM (3 mm thick plate, 0.8 mm channels,
+        1.5 mm vias by default)
+      - Have a collision-free routing topology — no two nets share a
+        same-layer groove at the same coordinate, no trunk passes through
+        a foreign pin hole
+
+      ## Existing assets to reuse
+
+      - AnchorSCAD vitamins: code/cad/src/vitamins/{esp32,sensors,substrate}.py
+      - Module dimension classes (Esp32C3SuperminiDimensions, Scd41Dimensions,
+        Bh1750Dimensions) — re-use, don't re-measure
+      - Routing data model: substrate.py defines Point2D, WireSegment, Via,
+        SignalPath. Plans should be translatable into this schema with no
+        further design decisions.
+      - KiCad sibling for the spike board: code/kicad/spike.kicad_pcb
+        (generated from gen_spike_pcb.py)
+
+      ## Known failure modes the check_routing step MUST catch
+
+      1. **Trunk-through-foreign-pin collision** (the original Tier1Substrate
+         bug): a wire trunk on layer L cannot pass through a through-hole
+         whose owning module's pin is not on that net. Pins protrude into
+         the channel from above and physically block / pierce the copper.
+         Original example: J1A-column trunks (VCC at y=-11.92, GND at y=-14.46)
+         routed east on L1 and collided with J1B pin 3 and pin 2 holes
+         at the same y values.
+      2. **Same-layer parallel collision**: two nets running at the same y on
+         the same layer fuse into one groove.
+      3. **Via-in-pocket**: a via that lands inside a module pocket recess
+         has nothing to drill through.
+      4. **Edge-of-board escape impossible**: a module placed in the middle of
+         the substrate may have inner-column pins with no straight-line
+         escape path; either move the module to the edge or change layers.
+
+      ## Output convention
+
+      All work products go under printable_pcb/<board_name>/ in the project
+      root. Re-runs for new boards create new sibling folders, not date-stamped
+      versions (each board's plan is a current-state living document).
+
+    steps:
+      - name: draft_plan
+        instructions: |
+          Read the design_brief and produce a complete substrate plan at
+          printable_pcb/<board_name>/substrate_plan.md.
+
+          ## Handling an incomplete brief
+
+          The brief is a free-form string and may omit critical information
+          (e.g. no per-pin net list, no board outline, unclear module
+          placements, missing layer budget). Before drafting, scan the brief
+          against the nine required plan sections below. If anything required
+          for sections 1–6 is missing or ambiguous, **ask the user structured
+          questions via the AskUserQuestion tool** before proceeding. Examples
+          of things worth asking:
+          - "The brief lists 3 modules but no pin assignments. Should I copy
+            the spike board's net list from code/kicad/gen_spike_pcb.py:33-74,
+            or do you want a different mapping?"
+          - "No board outline given. Use the spike default (80 × 50 × 3 mm),
+            or specify dimensions?"
+          - "Single-layer (L1 only, no vias) or two-layer (L1 + L2 with vias)?"
+
+          Items that have safe defaults (channel cross-section 0.8 × 0.8 mm,
+          via diameter 1.5 mm, hole diameter 1.0 mm, pocket clearance 0.3 mm)
+          do NOT need a question — apply the default and surface the choice
+          under (9) Open questions.
+
+          ## Plan structure
+
+          A complete plan has these sections, in order:
+
+          1. **Board identity**
+             - board_name (matches the folder)
+             - outline (width, height, thickness in mm)
+             - KiCad sibling reference (path + commit, if one exists)
+
+          2. **Modules**
+             - For each module: name, AnchorSCAD vitamin class
+               (e.g. `Esp32C3SuperminiDimensions`), placement (pin-1 x, y,
+               rotation), pin count, pitch.
+             - If a module lacks an existing vitamin class, flag it under
+               "Open questions" rather than inventing dimensions.
+
+          3. **Net list**
+             - Table: net_name | endpoints (list of `module.pin`).
+             - Cover EVERY pin: power, ground, unused pins (they still
+               produce holes). For the spike board, the source of truth
+               is code/kicad/gen_spike_pcb.py:33-74.
+
+          4. **Pocket layout**
+             - For each module: pocket centre (x, y), pocket dimensions
+               (w + clearance, h + clearance), pocket depth (= module
+               pcb_thickness). Default clearance 0.3 mm.
+
+          5. **Through-hole list**
+             - For every (module, pin): (x, y), diameter (default 1.0 mm),
+               net it belongs to.
+
+          6. **Per-net routing**
+             - For each net, write a prose subsection (chosen layer, trunk
+               topology, justification for bus nets choosing trunk-with-branches
+               vs star).
+             - THEN immediately after the prose for that net, include an
+               inline fenced YAML block (```yaml ... ```) with the
+               machine-readable routing. This block is the source of truth
+               the check_routing gate parses, and is what downstream code can
+               feed directly to the Point2D / WireSegment / Via / SignalPath
+               data model in code/cad/src/vitamins/substrate.py. Schema:
+
+               ```yaml
+               net: <net_name>
+               segments:
+                 - { layer: 1, start: [x, y], end: [x, y] }
+                 - ...
+               vias:
+                 - { position: [x, y], diameter: 1.5 }
+               ```
+
+               Use `layer: 1` for L1 (bottom), `layer: 2` for L2 (top), etc.
+               Omit the `vias:` key entirely if the net has no vias.
+               Coordinates are floats in mm. The prose subsection and the
+               YAML block MUST agree on every coordinate — the check_routing
+               step's review verifies this.
+
+          7. **Layer rationale**
+             - One sentence per net explaining the layer choice, especially
+               for nets that crossed columns or had no obvious L1 path.
+
+          8. **Risks-to-validate**
+             - Be paranoid. Bullet list naming every potential collision
+               the check_routing step must verify:
+               - Every trunk segment that crosses any module's pin column
+                 on the same layer.
+               - Every same-layer pair of segments at close y (or close x)
+                 values.
+               - Every via near a pocket edge.
+               - Every inner-column module pin and the layer it escapes on.
+
+          9. **Open questions**
+             - Anything the brief did not specify that you defaulted.
+        inputs:
+          design_brief:
+            required: true
+          board_name:
+            required: true
+        outputs:
+          substrate_plan.md:
+            required: true
+
+      - name: check_routing
+        instructions: |
+          This is the validation gate. Read substrate_plan.md and produce
+          printable_pcb/<board_name>/routing_check.md.
+
+          Do NOT modify the plan in this step. Diagnose only.
+
+          ## Source of truth
+
+          Parse the inline ```yaml ... ``` routing blocks under section 6 of
+          substrate_plan.md (per-net schema: `net`, `segments` [list of
+          {layer, start, end}], optional `vias` [list of {position, diameter}]).
+          These blocks are the source of truth — the prose subsections are
+          informational. If a net's YAML block is missing or its coordinates
+          disagree with the prose, that is itself a FAIL and should be noted
+          in the report before proceeding to the per-net checks.
+
+          For EACH net in substrate_plan.md's net list, produce a
+          subsection with the following structure:
+
+          ```
+          ### Net: <net_name>  layer assignment: L<n> (+ vias at ...)
+
+          Trunk segments:
+          - (L<n>, x_start, y_start, x_end, y_end)
+          - ...
+
+          Foreign-pin collisions:
+          - Segment 1 (L<n>, ...): list of (module.pin, x, y) that lie
+            within the segment's bounding box on layer L<n>, AND whose pin
+            is not an endpoint of this net. If none, write
+            "no foreign-pin collisions on L<n>".
+          - ...
+
+          Same-layer crossings:
+          - For every other net's segments on the same layer: enumerate
+            intersection points or declare disjoint.
+
+          Pocket overlaps:
+          - For each via and each top-layer segment: list pocket footprints
+            it lies inside or declare clear.
+
+          Verdict: PASS | FAIL — <one-line reason>
+          ```
+
+          End the report with:
+
+          ```
+          ## Overall verdict: PASS | FAIL
+
+          ## Suggested remediations (only if FAIL)
+          - Option A: reassign net <X> to L<n> ...
+          - Option B: re-place module <Y> ...
+          - Option C: split net <X> into segmented sub-paths with vias at ...
+          ```
+
+          ## Loop control
+
+          If Overall verdict is FAIL:
+          1. Present the report to the user with the suggested remediations.
+          2. Call `mcp__deepwork__go_to_step` with step_id="draft_plan" so
+             the next iteration redrafts with the collisions known.
+          3. Cap at 3 iterations (use the conversation history to count).
+             After the third FAIL, surface to the user — do NOT loop a
+             fourth time.
+
+          If Overall verdict is PASS, call `finished_step` with the report
+          path as normal.
+        inputs:
+          substrate_plan.md:
+            required: true
+        outputs:
+          routing_check.md:
+            required: true
+        process_requirements:
+          "Exhaustive enumeration": "Every net listed in substrate_plan.md MUST appear in the per-net section of routing_check.md with a recorded verdict. Missing a net is a silent failure mode that the original Tier1Substrate bug slipped through."
+          "Trunk segments as tuples": "Each net's trunk MUST be expressed as an ordered list of (layer, x_start, y_start, x_end, y_end) tuples, not prose. A subsequent reader (human or agent) MUST be able to mechanically verify each segment without re-interpreting the plan."
+          "No silent pass": "Overall verdict MUST be FAIL if any per-net verdict is FAIL. The report MUST NOT round up to PASS with a footnote."
+          "Foreign-pin coverage per layer": "For every trunk segment, the report MUST list (or explicitly negate) foreign pin holes within the segment's bounding box on the segment's layer. A prose summary like 'no obvious collisions' does not satisfy this requirement."
+          "Diagnose, do not patch": "check_routing MUST NOT mutate substrate_plan.md or any AnchorSCAD source. Remediations are suggested in the report; the loop back to draft_plan applies them."

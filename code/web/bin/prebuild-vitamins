@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+# prebuild-vitamins — convert third-party STEPs under data/models/ to GLB
+# and stage them into public/models/vitamins/ for the Astro gallery.
+#
+# Reads the model list from src/manifest.vitamins.yaml. Each entry's
+# `source` is interpreted relative to the repo root. Missing sources are
+# skipped with a warning so a fresh clone (where bin/fetch-models hasn't
+# been run yet) still builds.
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+web_dir="$(cd "${script_dir}/.." && pwd)"
+code_dir="$(cd "${web_dir}/.." && pwd)"
+repo_root="$(cd "${code_dir}/.." && pwd)"
+cad_dir="${code_dir}/cad"
+manifest="${web_dir}/src/manifest.vitamins.yaml"
+out_dir="${web_dir}/public/models/vitamins"
+
+mkdir -p "$out_dir"
+
+if [[ ! -f "$manifest" ]]; then
+  echo "[prebuild-vitamins] no manifest at ${manifest} — skipping"
+  exit 0
+fi
+
+# Parse `name:` / `source:` pairs out of the YAML. Stays string-only so
+# we don't need a YAML toolchain in this shell — the manifest is hand-
+# edited and small.
+mapfile -t entries < <(
+  awk '
+    /^[[:space:]]*-[[:space:]]*name:/ { name=$NF; src="" }
+    /^[[:space:]]*source:/            { sub(/^[[:space:]]*source:[[:space:]]*/, ""); src=$0; print name "\t" src }
+  ' "$manifest"
+)
+
+if [[ ${#entries[@]} -eq 0 ]]; then
+  echo "[prebuild-vitamins] manifest has no entries — nothing to do"
+  exit 0
+fi
+
+count_done=0
+count_skipped=0
+for entry in "${entries[@]}"; do
+  name="${entry%%$'\t'*}"
+  source_rel="${entry#*$'\t'}"
+  source_abs="${repo_root}/${source_rel}"
+  out_glb="${out_dir}/${name}.glb"
+  out_source="${out_dir}/$(basename "$source_rel")"
+
+  if [[ ! -f "$source_abs" ]]; then
+    echo "[prebuild-vitamins] skip ${name}: ${source_rel} not present (run bin/fetch-models?)"
+    count_skipped=$((count_skipped + 1))
+    continue
+  fi
+
+  echo "[prebuild-vitamins] ${name}: ${source_rel} -> ${out_glb#$web_dir/}"
+  (cd "$cad_dir" && nix develop --command bin/step-to-glb "$source_abs" "$out_glb")
+
+  cp -u "$source_abs" "$out_source"
+  count_done=$((count_done + 1))
+done
+
+if (( count_done > 0 )); then
+  echo "[prebuild-vitamins] baking axes into ${count_done} GLB(s)"
+  glbs=("$out_dir"/*.glb)
+  (cd "$cad_dir" && nix develop --command "${web_dir}/bin/add-axes" "${glbs[@]}") \
+    || echo "[prebuild-vitamins] WARN: add-axes failed; cards will render without axes" >&2
+fi
+
+echo "[prebuild-vitamins] done: ${count_done} converted, ${count_skipped} skipped"

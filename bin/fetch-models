@@ -1,0 +1,55 @@
+#!/usr/bin/env bash
+# fetch-models — pull non-redistributable third-party 3D models into
+# data/models/. Each fetch implicitly accepts the upstream's terms;
+# see data/models/<component>/ATTRIBUTION.md for what those are.
+#
+# WHY this isn't a one-liner curl: we sparse-checkout from the
+# upstream git repos so we get a small, deterministic snapshot
+# pinned to a known commit. Bumping the pin is an explicit edit
+# below.
+
+set -euo pipefail
+
+script_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+repo_root="$(cd "${script_dir}/.." && pwd)"
+data_root="${repo_root}/data/models"
+
+# Pinned upstream commits. Bump deliberately.
+SUPERMINI_REPO="https://github.com/mrtnvgr/KiCad_ESP32-C3-SuperMini"
+SUPERMINI_REF="HEAD"        # repo has no tags; track default branch tip
+SUPERMINI_FILE="ESP32-C3-SuperMini.stp"
+
+USINI_REPO="https://github.com/usini/usini_kicad_sensors"
+USINI_REF="HEAD"            # ditto
+USINI_FILE="usini_sensors.pretty/BH1750.step"
+
+tmp="$(mktemp -d)"
+trap 'rm -rf "$tmp"' EXIT
+
+fetch_single_file() {
+  local repo="$1" ref="$2" file="$3" dest="$4"
+  local clone_dir="${tmp}/$(basename "$repo")"
+  echo ">>> $repo : $file → $dest"
+  git clone --depth=1 --filter=blob:none --no-checkout "$repo" "$clone_dir" >/dev/null 2>&1
+  if [[ "$ref" != "HEAD" ]]; then
+    git -C "$clone_dir" fetch --depth=1 origin "$ref" >/dev/null 2>&1
+    git -C "$clone_dir" checkout "$ref" -- "$file"
+  else
+    git -C "$clone_dir" checkout HEAD -- "$file"
+  fi
+  mkdir -p "$(dirname "$dest")"
+  cp "${clone_dir}/${file}" "$dest"
+}
+
+fetch_single_file "$SUPERMINI_REPO" "$SUPERMINI_REF" "$SUPERMINI_FILE" \
+  "${data_root}/esp32_c3_supermini/ESP32-C3-SuperMini.stp"
+
+fetch_single_file "$USINI_REPO" "$USINI_REF" "$USINI_FILE" \
+  "${data_root}/bh1750_breakout/BH1750.step"
+
+echo
+echo "fetched into ${data_root}/"
+echo "  esp32_c3_supermini/ESP32-C3-SuperMini.stp  (mrtnvgr — license unstated)"
+echo "  bh1750_breakout/BH1750.step                (GrabCAD ToS via usini)"
+echo
+echo "By using these you accept the upstream terms; see each ATTRIBUTION.md."

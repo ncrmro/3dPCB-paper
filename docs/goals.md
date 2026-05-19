@@ -37,9 +37,14 @@ file on disk.
 
 ## Three design tiers
 
-### Tier 1 — flat single-layer substrate (plant-caravan target)
+The three tiers escalate along two independent axes: **conductor
+mechanism** (how the wire is held in place) and **dimensionality**
+(flat plate vs. multi-level Z-stack). Each tier exposes the same
+netlist; only the physical embodiment changes.
 
-The minimal viable artifact and the urgent one.
+### Tier 1 — flat substrate, bare-copper through-hole conductor
+
+The minimal viable artifact and the one plant-caravan consumes.
 
 - 3D-printed flat plate.
 - ESP32-C3 SuperMini + SCD41 + BH1750 laid out coplanar, inlay pockets
@@ -56,50 +61,89 @@ Why it's first: plant-caravan's PR #28 already has the enclosure +
 sensor mount geometry; what it lacks is a routed substrate that
 solves the wiring story. Tier 1 unblocks that PR.
 
-### Tier 2 — compartmentalized enclosure
+### Tier 2 — Tier 1 substrate + OLED device on pressure-fit receptacles
 
-Builds on Tier 1's wire technique inside a thermally partitioned case.
+Same flat plate, same three modules as Tier 1 mounted exactly the
+same way (bare copper wire soldered through through-holes —
+**unchanged**). The *only* new element is a fourth I2C device,
+mounted by a brand-new mechanism:
+
+- **+1 device on the primary I2C bus**: a Hosyond SSD1306
+  128 × 64 OLED display. Lets the running stack show its own
+  sensor readings in real time, closing the loop from "soldered
+  bus" to "live demo."
+- **OLED-only pressure-fit receptacles**: the OLED's 4 male pins
+  (`GND, VCC, SCL, SDA` looking down at the display) plug into 4
+  printed female pockets sized to grip a 0.64 mm pin by
+  interference fit. The printed plastic IS the socket — no
+  off-the-shelf header strip, no solder joint at the receptacle.
+  Copper wire continues from the back of each receptacle into the
+  same channel layout as Tier 1.
+- Everything else stays Tier 1's mechanism: the ESP32, SCD41, and
+  BH1750 still mount via inlay pockets and bare copper soldered
+  through through-holes. The pressure-fit receptacle scope is
+  bounded to four pin positions so the FDM tolerance dial-in is
+  small and isolated.
+- The netlist abstraction from Tier 1 (per-sensor PINOUT modules
+  in `code/cad/src/vitamins/<sensor>_pinout.py`) absorbs the new
+  device with no code change to the substrate or the routing —
+  just an `oled_ssd1306_pinout.py` declaring the OLED's silkscreen
+  pin order. This is the design's first real validation that
+  "add a sensor = add a PINOUT dict."
+
+Why second: minimal new mechanism (4 receptacles, not 27),
+minimal new device (1 OLED, on the existing bus), maximum
+demonstrative value (live readings from the substrate). Validates
+that the netlist + collision-test infrastructure scales to
+additional bus devices, and produces the first iteration of the
+printed-receptacle geometry that Tier 3's multi-level harness
+will reuse.
+
+The parallel KiCad-PCB embodiment uses standard
+`Connector_PinSocket_2.54mm` footprints from `kicad-packages3d`
+for the OLED slot (`code/kicad/gen_spike_pcb.py` already supports
+this style); the 3D-printed receptacle is the FDM-side analogue.
+
+### Tier 3 — multi-level Z-stacked enclosure with bus harness
+
+The first tier where the **Z axis carries meaning**. The substrate is
+no longer a flat plate but a multi-floor structure: separate levels
+for the MCU, the environmental sensors, and (optionally) the user
+interface. The bus harness routes vertically between floors through
+printed vias / wire-channels in the supporting walls.
 
 - ESP32-C3 sits in its own compartment, walled off from the
-  environmental sensors so MCU self-heating doesn't bias readings.
-- BH1750 (light) faces up through the lid.
-- SCD41 (CO2 / temperature / humidity) faces down through the floor or
-  a side vent, sampling outside-case air.
-- Wire channels routed through compartment walls; same bare-copper
-  through-hole conductor technique as Tier 1.
+  environmental sensors so MCU self-heating doesn't bias the SCD41
+  temp/humidity readings.
+- BH1750 (light) faces up through the lid; SCD41 (CO2 / temperature
+  / humidity) faces down through the floor or a side vent so it
+  samples outside-case air; OLED faces a viewing surface.
+- The I2C bus runs as a vertical harness through wall-internal
+  channels — same conductor mechanism as Tier 2 (pressure-fit
+  receptacles + DuPont jumpers), now extended into the Z axis.
+  Vias become real holes through floor/wall plates; receptacles can
+  appear on any face of any level.
+- Multi-level routing forces the netlist's `Bus` model to grow a
+  notion of `level` so the test gate can sweep collisions per
+  floor-plane and per inter-floor harness.
 
-Why second: requires Tier 1's routing to work, plus enclosure
-geometry generation (see `code/cad/src/vitamins/` for the existing
-shape primitives; plant-caravan PR #28 has the parallel design in
-`hardware/cad/src/parts/enclosure.py`).
-
-### Tier 3 — socketed substrate with KiCad parity
-
-Reworkable build: the substrate (or the parallel fabricated PCB)
-accepts each COTS module's existing pre-soldered male header strip.
-
-- Female 0.1″ sockets integrated into the substrate (3D-printed
-  pockets sized for socket-housing inlay) or routed in the KiCad PCB
-  (`Connector_PinSocket_2.54mm` from kicad-packages3d, already wired
-  in `code/kicad/gen_spike_pcb.py`).
-- Same netlist as Tiers 1–2; different physical embodiment.
-- Modules pull out. Useful when a sensor dies or a clone arrives with
-  a different pinout.
-
-Why third: most infrastructure (female sockets, packages3d, GLB
-rendering, KiCad → GLB pipeline) is already landed. What remains is
-the parallel 3D-printed-socket variant and the agent-facing "build
-this tier" CLI.
+Why third: requires Tier 2's pressure-fit receptacle work to be
+solid, plus genuine enclosure-geometry generation (multi-floor
+shells, wall-internal channels, alignment between levels). Deployment
+data from plant-caravan should also have surfaced concrete thermal
+or sensor-orientation requirements by then.
 
 ## Order of urgency
 
-1. **Tier 1 — now.** plant-caravan PR #28 is in flight; the substrate
-   needs to be printable end-of-week.
-2. **Tier 3 — already underway.** Female PinSocket footprints landed;
-   `spike.glb` shows raised sockets. Remaining work is the printed
-   socket variant + agent CLI.
-3. **Tier 2 — after Tier 1 is in plant-caravan's hands.** Needs
-   thermal-isolation requirements firmed up from real deployment data.
+1. **Tier 1 — done.** Substrate STL printable; netlist + collision
+   gate in `code/cad/`; KiCad sibling regenerates identically.
+   `docs/progress.md` records the artefacts.
+2. **Tier 2 — next.** Pressure-fit female receptacles + OLED as a
+   fourth bus device. The netlist abstraction was designed to make
+   the extra device a no-code-change addition.
+3. **Tier 3 — later.** Multi-level enclosure + Z-axis bus harness.
+   Comes after Tier 2 ships, when deployment data has firmed up the
+   thermal-isolation and sensor-orientation requirements.
 
 ## Relationship to docs/plan.md
 
@@ -109,11 +153,19 @@ different output target of the same compiler, not a different
 compiler:
 
 - Tier 1 needs Phase 0–3 (ingest, vitamin registry, placement,
-  greedy router) targeting a flat substrate.
-- Tier 2 reuses Phase 0–3 plus enclosure-geometry generation.
-- Tier 3 reuses Phase 0 plus the KiCad-PCB output path already
-  working in `code/kicad/gen_spike_pcb.py`.
+  greedy router) targeting a flat substrate with through-holes.
+- Tier 2 reuses Phase 0–3, plus a per-pin receptacle-geometry
+  generator and one extra bus device (OLED) plugged into the
+  existing netlist abstraction.
+- Tier 3 reuses Phase 0–3, plus multi-floor enclosure generation
+  and a Z-aware extension of the routing/collision model so the
+  bus harness can route between levels.
+
+The KiCad-PCB output path (`code/kicad/gen_spike_pcb.py`) is a
+parallel embodiment of *any* tier's netlist — at every tier the
+3D-printed substrate and the etched-copper PCB share the same
+single source of truth in `code/cad/src/netlist.py`.
 
 If you're picking up this repo and want to ship something
-plant-caravan can use, work toward **Tier 1** through `plan.md`'s
-Phase 0–3. The other tiers are downstream once that lands.
+plant-caravan can use, **Tier 1** is already done; the next
+incremental step is Tier 2.

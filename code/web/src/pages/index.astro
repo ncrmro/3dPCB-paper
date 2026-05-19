@@ -15,6 +15,7 @@ export const prerender = true;
 import { parse as parseYaml } from "yaml";
 import cadManifestYaml from "../manifest.cad.yaml?raw";
 import kicadManifestYaml from "../manifest.kicad.yaml?raw";
+import vitaminsManifestYaml from "../manifest.vitamins.yaml?raw";
 
 const placementYamls = import.meta.glob<string>(
   "../../../kicad/placements/*.yaml",
@@ -51,6 +52,30 @@ type KicadManifest = {
 };
 const kicadManifest = parseYaml(kicadManifestYaml) as KicadManifest;
 const kicadModels: KicadModel[] = kicadManifest.models ?? [];
+
+// Third-party vitamins manifest — STEP / STP sources under data/models/
+// are converted to GLB by bin/prebuild-vitamins and staged into
+// public/models/vitamins/. The source file is staged alongside for
+// download; `license` annotates the upstream terms.
+interface VitaminModel {
+  name: string;
+  label?: string;
+  source: string;
+  license?: string;
+  camera?: string;
+}
+interface VitaminsManifest {
+  project: string;
+  models: VitaminModel[];
+  cameras?: Record<string, string>;
+}
+const vitaminsManifest = parseYaml(vitaminsManifestYaml) as VitaminsManifest;
+const vitaminCameras = vitaminsManifest.cameras ?? {};
+const vitaminCards = (vitaminsManifest.models ?? []).map((m) => ({
+  ...m,
+  sourceBasename: m.source.split("/").pop() ?? m.source,
+  cameraOrbit: vitaminCameras[m.camera ?? "iso"] ?? vitaminCameras.iso,
+}));
 
 // Embodiment pairs — substrate variants pairing a substrate GLB with a
 // KiCad PCB. Each YAML under code/kicad/placements/ becomes one entry.
@@ -213,6 +238,51 @@ const placements: Placement[] = Object.values(placementYamls).map(
         }
       </section>
       <!-- /KiCad gallery section -->
+
+      <!-- Third-party vitamins gallery section -->
+      <section class="model-group gallery vitamins">
+        <div class="model-group-header">
+          <h2>Third-party 3D models</h2>
+        </div>
+        {
+          vitaminCards.length === 0 ? (
+            <p class="empty-state-inline">
+              no vitamins staged yet &mdash; see <code>data/models/</code>
+            </p>
+          ) : (
+            <div class="screenshot-grid">
+              {vitaminCards.map((m) => (
+                <article class="screenshot-card">
+                  <model-viewer
+                    src={`/models/vitamins/${m.name}.glb`}
+                    alt={m.label ?? m.name}
+                    camera-controls
+                    auto-rotate
+                    camera-orbit={m.cameraOrbit}
+                    shadow-intensity="1"
+                    exposure="0.9"
+                    style="width: 100%; height: 320px;"
+                  />
+                  <div class="card-footer">
+                    <span class="angle-label">vitamin</span>
+                    <span>{m.label ?? m.name}</span>
+                  </div>
+                  <div class="card-downloads">
+                    <a href={`/models/vitamins/${m.sourceBasename}`} download>STEP</a>
+                    {m.license && (
+                      <>
+                        <span class="dot">·</span>
+                        <span class="license-tag" title="upstream license">{m.license}</span>
+                      </>
+                    )}
+                  </div>
+                </article>
+              ))}
+            </div>
+          )
+        }
+      </section>
+      <!-- /Third-party vitamins gallery section -->
     </main>
 
     <!-- Lightbox shell ported from cadeng; wired up in a later PR. -->

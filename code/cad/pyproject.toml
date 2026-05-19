@@ -16,6 +16,7 @@ dependencies = [
     "networkx>=3.0",
     "lxml>=5.0",
     "manifold3d>=3.0",
+    "pytest>=8.0",
 ]
 
 [build-system]
@@ -24,3 +25,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]

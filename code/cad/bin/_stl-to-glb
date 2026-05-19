@@ -1,0 +1,26 @@
+#!/usr/bin/env -S uv run --script
+# /// script
+# requires-python = ">=3.13"
+# dependencies = [
+#   "trimesh>=4.0",
+#   "numpy>=2.0",
+# ]
+# ///
+"""STL -> GLB. Used by step-to-glb after FreeCADCmd's tessellation."""
+
+import sys
+from pathlib import Path
+
+import trimesh
+
+if len(sys.argv) != 3:
+    sys.stderr.write("usage: _stl-to-glb INPUT.stl OUTPUT.glb\n")
+    sys.exit(2)
+
+inp, out = Path(sys.argv[1]), Path(sys.argv[2])
+mesh = trimesh.load(str(inp), force="mesh")
+if mesh.is_empty:
+    sys.stderr.write(f"_stl-to-glb: empty mesh from {inp}\n")
+    sys.exit(1)
+out.parent.mkdir(parents=True, exist_ok=True)
+mesh.export(str(out))

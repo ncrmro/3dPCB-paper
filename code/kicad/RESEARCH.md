@@ -44,7 +44,12 @@ No GitHub project was found that combines all three modules in a single KiCad de
 - **Loufe ESPHome YAML**: unlicensed; treat as all-rights-reserved if we copy any YAML verbatim.
 - **EObianom, 21km43**: license unstated — reference only, do not fork into a permissively-licensed publication.
 - **KiCad official libraries**: CC-BY-SA 4.0 with an explicit library exception allowing use in any-licensed design without copyleft propagation — fully compatible with MIT / Apache / CC-BY / CERN-OHL publication.
-- **usini/usini_kicad_sensors**: CC-0 — fully compatible.
+- **usini/usini_kicad_sensors**: schematics + footprints are CC-0 (fully compatible). The 3D `.step` models in `usini_sensors.pretty/` are **NOT CC-0** — most (incl. `BH1750.step`) are GrabCAD uploads under GrabCAD's User Submission terms ("royalty-free perpetual use, **non-sublicensable, non-assignable, non-transferable**"). Use as-is in private designs is fine; redistributing under our CERN-OHL-S target is not. See `data/models/bh1750_breakout/ATTRIBUTION.md`.
 - **Espressif kicad-libraries**: Apache-2.0 — fully compatible.
 
-**Net**: a fully permissive publication is achievable if we (a) use the KiCad-official `SCD40-D-R2` symbol referenced via 1x4 header, (b) use usini's GY-302 module footprint, and (c) reference the Supermini via SnapEDA part number in the BOM without committing its files — or get explicit licensing from mrtnvgr.
+**Net**: a fully permissive publication is achievable if we (a) use the KiCad-official `SCD40-D-R2` symbol referenced via 1x4 header, (b) use usini's GY-302 module **footprint** (CC-0) but source the GY-302 3D model elsewhere (or omit it), and (c) reference the Supermini via SnapEDA part number in the BOM without committing its files — or get explicit licensing from mrtnvgr.
+
+For the Adafruit STEMMA QT 5190 (SCD41) breakout specifically, the
+[`adafruit/Adafruit_CAD_Parts`](https://github.com/adafruit/Adafruit_CAD_Parts)
+repo ships a STEP under MIT (product 5187, same PCB as 5190) — committed in
+`data/models/scd40_breakout/` and fully compatible with the publication target.

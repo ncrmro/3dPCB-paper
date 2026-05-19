@@ -12,7 +12,34 @@ the nixpkgs `kicad` package in this repo's dev shell does not ship
 """
 from __future__ import annotations
 
+import os
+import sys
 import uuid
+
+# The pin->net assignments are the canonical source of truth maintained
+# next to each sensor's geometry under ../cad/src/vitamins/. Both
+# embodiments (AnchorSCAD substrate, KiCad PCB) consume the same data
+# so the two cannot drift.
+_CAD_SRC = os.path.join(os.path.dirname(__file__), "..", "cad", "src")
+sys.path.insert(0, os.path.abspath(_CAD_SRC))
+from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT  # noqa: E402
+from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT  # noqa: E402
+
+
+def _labels(pinout: dict) -> dict[int, str]:
+    """Render a netlist PINOUT down to the {pin_num: net_label} dict
+    the rest of gen_spike_pcb.py expects.
+
+    A pin with a signal AND a function (e.g. SDA on GPIO5) renders as
+    the SIGNAL — that's the KiCad-side net name. A pin with only a
+    function (e.g. GPIO4 on J1A) renders as the function string. A pin
+    with only a signal (most sensor pads) renders as the signal value.
+    """
+    return {
+        n: (p.signal.value if p.signal else p.function)
+        for n, p in pinout.items()
+    }
+
 
 # Board geometry (mm). Origin is upper-left page corner per KiCad convention.
 ORIGIN_X = 100.0
@@ -22,56 +49,12 @@ BOARD_H = 50.0
 
 PITCH = 2.54  # 0.1" header pitch
 
-# Footprint placements (top-left pad position of pin 1 on F.Cu).
-# Each entry: ref, value, pin_count, pos_x, pos_y, net_map (pin_number -> net_name)
-# Pins extend in +y direction; pin 1 at pos.
-
-# Supermini left row (9 pins, top to bottom: 5V, GND, 3V3, GPIO4, GPIO3,
-# GPIO2, GPIO1, GPIO0, NC). The Supermini physically has 8 pins per row,
-# but the README says "2 x 1x9 castellated (or female header rows)" so we
-# follow the README and use 9-pin rows.
-J1A_PINS = {
-    1: "+5V",    # unused
-    2: "GND",
-    3: "+3V3",
-    4: "GPIO4",  # not used by the bus
-    5: "GPIO3",
-    6: "GPIO2",
-    7: "GPIO1",
-    8: "GPIO0",
-    9: "NC",
-}
-
-# Supermini right row (9 pins, top to bottom): GPIO5=SDA, GPIO6=SCL,
-# GPIO7, GPIO8, GPIO9, GPIO10, GPIO20, GPIO21, NC.
-J1B_PINS = {
-    1: "SDA",   # GPIO5
-    2: "SCL",   # GPIO6
-    3: "GPIO7",
-    4: "GPIO8",
-    5: "GPIO9",
-    6: "GPIO10",
-    7: "GPIO20",
-    8: "GPIO21",
-    9: "NC2",
-}
-
-# SCD41 breakout 1x4 — Adafruit STEMMA QT 5190 pin order: VCC, GND, SCL, SDA.
-J2_PINS = {
-    1: "+3V3",
-    2: "GND",
-    3: "SCL",
-    4: "SDA",
-}
-
-# BH1750 GY-302 1x5: VCC, GND, SCL, SDA, ADDR.
-J3_PINS = {
-    1: "+3V3",
-    2: "GND",
-    3: "SCL",
-    4: "SDA",
-    5: "ADDR",
-}
+# Pin-net dicts derived from the netlist PINOUTs — single source of truth
+# lives next to each sensor's geometry class.
+J1A_PINS = _labels(J1A_PINOUT)
+J1B_PINS = _labels(J1B_PINOUT)
+J2_PINS = _labels(SCD41_PINOUT)
+J3_PINS = _labels(BH1750_PINOUT)
 
 # Positions (top of pin 1) for each footprint.
 J1A_X, J1A_Y = ORIGIN_X + 10.0, ORIGIN_Y + 8.0
@@ -304,6 +287,19 @@ def footprint(
     )
 
     at_block = f"(at {x} {y})" if rotation == 0.0 else f"(at {x} {y} {rotation})"
+    # Reference the official KiCad PinSocket 3D model. Pad layout above
+    # (pin 1 at origin, pins extending +y) matches the stdlib footprint
+    # `Connector_PinSocket_2.54mm:PinSocket_1x{NN}_P2.54mm_Vertical`, so
+    # zero offset/scale/rotate is correct. kicad-cli resolves
+    # ${{KICAD9_3DMODEL_DIR}} from the dev shell (see code/kicad/flake.nix).
+    model_block = (
+        f'\t\t(model "${{KICAD9_3DMODEL_DIR}}/Connector_PinSocket_2.54mm.3dshapes/'
+        f'PinSocket_1x{pin_count:02d}_P2.54mm_Vertical.stpZ"\n'
+        f'\t\t\t(offset (xyz 0 0 0))\n'
+        f'\t\t\t(scale (xyz 1 1 1))\n'
+        f'\t\t\t(rotate (xyz 0 0 0))\n'
+        f'\t\t)'
+    )
     return f"""\t(footprint "spike:PinHeader_1x{pin_count:02d}"
 \t\t(layer "F.Cu")
 \t\t(uuid "{fp_uuid}")
@@ -348,6 +344,7 @@ def footprint(
 \t\t)
 {pads_str}
 \t\t(embedded_fonts no)
+{model_block}
 \t)
 """
 
