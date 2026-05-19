@@ -41,3 +41,6 @@ models:
   - name: tier2_substrate
     glb: /models/cad/tier2_substrate.glb
     camera: top
+  - name: receptacle_test_coupon
+    glb: /models/cad/receptacle_test_coupon.glb
+    camera: top
