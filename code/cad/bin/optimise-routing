@@ -1,0 +1,9 @@
+#!/usr/bin/env bash
+# Run the greedy routing-hint optimiser on PRIMARY_BUS and print the
+# recommended ROUTING dict + total wire length vs the hand-authored
+# values. Use as a sanity check on hand-authored hints; the optimiser
+# output is NOT yet wired back into netlist.py — leave that as a
+# follow-up after a human reviews the suggested hints.
+set -euo pipefail
+cd "$(dirname "$0")/.."
+PYTHONPATH=src exec uv run python -m router "$@"

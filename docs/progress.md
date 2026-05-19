@@ -203,6 +203,49 @@ Requires Tier 2's pressure-fit receptacle work to be solid, plus:
 Comes after Tier 2 ships, when deployment data has firmed up the
 thermal-isolation and sensor-orientation requirements.
 
+## Routing optimiser
+
+A small constraint-based optimiser (`code/cad/src/router/`) picks
+routing hints — `(north_x, corridor_y, scd_east_on_l2)` — that
+minimise total wire length while satisfying the existing collision
+rules. Brute-force enumeration on a small parameter grid, not a real
+autorouter.
+
+- **Algorithm.** Outer enumeration over all 2^|signals| layer-choice
+  patterns (4 signals → 16 patterns); inner per-net greedy on the
+  `(north_x, corridor_y)` grid. Each net commits to its lowest-cost
+  collision-free candidate before the next net runs, and the final
+  layer-pattern with the smallest bus-total wins. A pure single-pass
+  greedy was tried first and got stuck: minimising VCC alone picks an
+  L1 east corridor that then blocks GND/SCL/SDA crossings. The outer
+  layer-pattern loop sidesteps that without resorting to backtracking.
+- **Search-space size.** Default grid: `north_x` ∈ [-29.5, 30.0]
+  step 0.5 mm (120 values), `corridor_y` ∈ [6.0, 24.0] step 0.5 mm
+  (37 values), `scd_east_on_l2` ∈ {True, False}. ~195k candidates
+  considered for the full Tier 2 bus; ~16 s wall-clock in the dev
+  shell.
+- **Result for `PRIMARY_BUS` (Tier 2).** Total 651.7 mm vs 699.7 mm
+  hand-authored — 6.9 % shorter. The optimised hints concentrate the
+  corridor rows at y = 6/7/8/9 (vs hand-authored 6/9/12/15), saving
+  vertical travel on the south leg to each device pin.
+- **Collision helpers.** Extracted from `tests/test_netlist.py` to
+  `router/collisions.py` so the tests AND the optimiser call one
+  implementation; the existing 24 netlist tests still pass.
+- **Reused, not adopted.** The optimiser is a sanity check on the
+  hand-authored ROUTING table — its output is NOT yet wired back
+  into `netlist.py`. Use `bin/optimise-routing` to inspect the
+  suggested hints; promoting them to production is a follow-up.
+- **Known limitations.** Module placements are fixed; the routing
+  topology shape is fixed; the `_VIA_PENALTY_MM` = 5 mm scoring
+  constant is hand-picked; the grid resolution (0.5 mm) is fine
+  enough for the spike board but may need refinement on denser
+  boards. When the parallel `feat/wire-cut-list` PR lands, its
+  `SignalPath.length_mm` and the optimiser's `path_length_mm` should
+  be reconciled to one implementation.
+- **Tests.** `code/cad/tests/test_optimiser.py` — 5 cases: convergence,
+  collision-clean output, determinism, route-around-blocker
+  constraint sensitivity, fail-loud-on-overconstrained.
+
 ## Parallel embodiment — KiCad PCB sibling
 
 At every tier the netlist supports a KiCad-PCB embodiment in
