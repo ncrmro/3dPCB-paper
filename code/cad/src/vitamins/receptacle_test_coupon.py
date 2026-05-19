@@ -9,17 +9,32 @@ pin tips on the underside — so you can also test threading copper
 wire through the receptacle and confirming electrical contact with a
 seated pin.
 
+⚠ Empirical observation (2026-05-19, Bambu Studio defaults, 0.4 mm
+nozzle): designed hole diameters below ~0.7 mm DO NOT print as
+through-holes — the slicer / printer closes them entirely. The
+original 0.50–0.65 mm coupon produced ZERO holes that light could
+pass through. See `docs/fdm_tolerance_notes.md` for the full
+measurements. The current defaults (0.80, 0.95, 1.10, 1.25 mm) are
+chosen to bracket a likely-printable range; YOUR printer may need
+the values shifted.
+
 Suggested workflow:
 1. Slice + print this coupon. Default size is ~20 × 30 × 3 mm.
-2. Press a single OLED header pin (or DuPont jumper) into each row in
-   turn. Note which diameter grips with a satisfying "click" but lets
-   the pin still seat fully (~3 mm flush).
-3. Lay a length of bare 22 AWG copper wire in the bottom-face channel
+2. Check the printed holes are open — hold the coupon up to a light
+   source and confirm each row's 4 holes pass light. If a row is
+   closed, you need to bump that row's diameter upward in CAD.
+3. Press a single OLED header pin (or DuPont jumper) into each open
+   row in turn. Note which diameter grips with a satisfying "click"
+   but lets the pin still seat fully (~3 mm flush).
+4. Lay a length of bare 22 AWG copper wire in the bottom-face channel
    of that row. Confirm the wire makes physical contact with the pin
    tip protruding below the receptacle.
-4. Update `Tier1SubstrateDimensions.receptacle_diameter` in
+5. Update `Tier1SubstrateDimensions.receptacle_diameter` in
    `vitamins/substrate.py` to the winning value, then re-render
    `tier2_substrate` for the real print.
+
+If no row produces a snug fit, iterate: edit `diameters` below to
+shift the test range and re-print.
 """
 
 from dataclasses import field
@@ -37,10 +52,14 @@ class ReceptacleTestCouponDimensions:
     depth: float = 30.0     # y extent
     thickness: float = 3.0  # z, matches the substrate thickness
 
-    # Receptacle diameters to compare. One row per entry. Defaults
-    # bracket the substrate's nominal `receptacle_diameter` (0.6 mm)
-    # by ±0.05 mm and one stop above/below.
-    diameters: tuple[float, ...] = (0.50, 0.55, 0.60, 0.65)
+    # Receptacle diameters to compare. One row per entry.
+    #
+    # 2026-05-19 v2: the original 0.50–0.65 mm range printed as solid
+    # plastic (no through-holes resolved at all) under default Bambu
+    # Studio settings on a 0.4 mm nozzle. New defaults shift up to a
+    # range where small through-holes are reliably resolved.
+    # See `docs/fdm_tolerance_notes.md` for the empirical data.
+    diameters: tuple[float, ...] = (0.80, 0.95, 1.10, 1.25)
 
     # Pin layout per row (matches an OLED 4-pin 2.54 mm header).
     pin_pitch: float = 2.54

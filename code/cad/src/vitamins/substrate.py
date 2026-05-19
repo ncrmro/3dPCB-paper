@@ -206,9 +206,15 @@ class Tier1SubstrateDimensions:
     overcut: float = 0.1
     # Receptacle hole diameter for OLED male DuPont pin (~0.64 mm pin).
     # Smaller than `hole_diameter` so the printed plastic grips by
-    # interference fit. 0.6 mm is a first-pass target for a 0.2 mm
-    # layer FDM print; iterate per print.
-    receptacle_diameter: float = 0.6
+    # interference fit.
+    #
+    # 2026-05-19: the prior 0.6 mm default printed as solid plastic
+    # — slicer / printer closes through-holes that small. The new
+    # default (0.95 mm) sits in the mid-range of the
+    # ReceptacleTestCoupon's bracket; refine to whatever value
+    # printed snugly on your specific printer.
+    # See `docs/fdm_tolerance_notes.md`.
+    receptacle_diameter: float = 0.95
     esp32: Esp32C3SuperminiDimensions = field(default_factory=Esp32C3SuperminiDimensions)
     scd41: Scd41Dimensions = field(default_factory=Scd41Dimensions)
     bh1750: Bh1750Dimensions = field(default_factory=Bh1750Dimensions)
