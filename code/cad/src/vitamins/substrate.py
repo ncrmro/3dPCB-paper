@@ -215,6 +215,37 @@ class Tier1SubstrateDimensions:
     # printed snugly on your specific printer.
     # See `docs/fdm_tolerance_notes.md`.
     receptacle_diameter: float = 0.95
+
+    # OLED mounting features (Tier 2 only). The OLED PCB cantilevers
+    # north from the receptacles in J4 and would otherwise rest at
+    # z ≈ +5.5 mm — well below the SCD41 sensor IC top at z ≈ +7.65
+    # mm (measured: 9.15 mm from substrate back to CO2 sensor top).
+    # The pedestal lifts the OLED's header plastic body (and the OLED
+    # PCB above it) high enough to clear the SCD41 with margin; the
+    # support bump props up the cantilevered north end of the OLED
+    # PCB so it stays level.
+    #
+    # Geometry budget (substrate-back z=-1.5, substrate-top z=+1.5):
+    #   pedestal top      = +1.5 + 5.0 = +6.5
+    #   header plastic    = +2.5
+    #   OLED PCB bottom   = +6.5 + 2.5 = +9.0   ← target ≥ SCD41 top
+    #   SCD41 sensor top  = +7.65 (measured)
+    #   clearance         = 1.35 mm
+    #
+    oled_pedestal_width: float = 12.0   # x extent (covers 4 pins at 2.54)
+    oled_pedestal_depth: float = 4.0    # y extent
+    oled_pedestal_height: float = 5.0   # z above substrate top
+
+    # Support bump under the OLED PCB's north end (cantilever support).
+    # Height matches the pedestal so the OLED PCB sits level. xy chosen
+    # to clear the SCD41 sensor IC footprint (x ∈ [6.06, 11.56],
+    # y ∈ [-8.10, -2.60]) — bump centred at (0, 0) leaves it 6+ mm
+    # west of the SCD41 IC.
+    oled_support_bump_width: float = 4.0
+    oled_support_bump_depth: float = 4.0
+    oled_support_bump_height: float = 5.0
+    oled_support_bump_x: float = 0.0
+    oled_support_bump_y: float = 0.0
     esp32: Esp32C3SuperminiDimensions = field(default_factory=Esp32C3SuperminiDimensions)
     scd41: Scd41Dimensions = field(default_factory=Scd41Dimensions)
     bh1750: Bh1750Dimensions = field(default_factory=Bh1750Dimensions)
@@ -230,9 +261,13 @@ class Tier1Substrate(ad.CompositeShape):
     through-hole. No pressure-fit receptacles, no OLED. The substrate
     routes only the SCD41 + BH1750 devices (see `netlist.TIER1_BUS`).
 
-    Subclasses extend this class with extra holes / additional bus
-    devices via the `_routed_nets()` and `_punch_extra_holes()` hooks;
-    see `Tier2Substrate` below.
+    Subclasses extend this class via three hooks:
+      - `_routed_nets()` to add bus devices.
+      - `_add_extra_solids()` to add raised features above the substrate
+        top (pedestals, support bumps, standoffs).
+      - `_punch_extra_holes()` to add holes (receptacles, vents) after
+        the base 27 through-holes and 3 pockets.
+    `Tier2Substrate` below uses all three.
     """
 
     dim: Tier1SubstrateDimensions = field(default_factory=Tier1SubstrateDimensions)
@@ -241,6 +276,11 @@ class Tier1Substrate(ad.CompositeShape):
         """Which NETS this substrate routes. Tier 1 = SCD41 + BH1750."""
         from netlist import TIER1_NETS
         return TIER1_NETS
+
+    def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
+        """Hook for subclasses to add raised features (pedestals,
+        support bumps) above the substrate top. Tier 1 adds nothing."""
+        pass
 
     def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
         """Hook for subclasses to add extra holes (receptacles, etc.).
@@ -257,6 +297,11 @@ class Tier1Substrate(ad.CompositeShape):
         # `overcut` past the substrate edge so CSG cuts cleanly.
         l1_z = -d.thickness / 2 + d.channel_depth / 2 - d.overcut / 2
         l2_z = d.thickness / 2 - d.channel_depth / 2 + d.overcut / 2
+
+        # ---- raised features above substrate top (subclass hook) ------
+        # Done BEFORE punching receptacles so subclass holes can extend
+        # through both the substrate body AND any added raised features.
+        self._add_extra_solids(shape, d)
 
         # ---- module pin through-holes ---------------------------------
         hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
@@ -357,34 +402,87 @@ class Tier1Substrate(ad.CompositeShape):
 @datatree
 class Tier2Substrate(Tier1Substrate):
     """Tier 1 substrate + Hosyond SSD1306 OLED on 4 pressure-fit female
-    receptacles south of the existing module pockets.
+    receptacles, raised on a pedestal that lifts the OLED PCB above
+    the SCD41 sensor IC.
 
     Everything in `Tier1Substrate` is inherited unchanged: same outline,
     same 3 module pockets, same 27 module pin through-holes, same
     bare-copper routing topology. Tier 2 *adds*:
 
-    - 4 receptacle holes at the OLED's J4 pin positions (y=-22), sized
-      `dim.receptacle_diameter` for interference fit on a DuPont pin
-      instead of the standard `dim.hole_diameter` clearance.
-    - OLED participation on the I2C bus (routing extends to include the
-      OLED via `netlist.TIER2_NETS`).
+    - **Raised pedestal** centred on the OLED header (y=-22), 5 mm tall.
+      Lifts the OLED's header plastic body — and therefore the OLED PCB
+      itself — above the substrate top by enough to clear the SCD41
+      sensor IC (top at z ≈ +7.65 from the substrate back).
+    - **4 receptacle holes** through both the substrate AND the pedestal
+      (combined 8 mm bore) at the OLED's J4 pin positions, sized
+      `dim.receptacle_diameter` for interference fit on a 0.64 mm
+      DuPont pin.
+    - **Support bump** north of the receptacles, same height as the
+      pedestal, to prop the OLED PCB's cantilevered end at the same
+      level so the PCB stays parallel to the substrate.
+    - OLED participation on the I2C bus (routing extends via
+      `netlist.TIER2_NETS`).
 
-    The OLED PCB cantilevers south off the substrate; its xy footprint
-    is disjoint from the BH1750's so the light sensor's upward field
-    of view is clear.
+    The pedestal + bump combination is what makes the OLED physically
+    safe to mount alongside the SCD41: without them the OLED PCB would
+    sit at z ≈ +5.5 — well below the SCD41 sensor IC top at z ≈ +7.65,
+    crashing into the sensor.
     """
 
     def _routed_nets(self) -> dict[I2cSignal, Net]:
         from netlist import TIER2_NETS
         return TIER2_NETS
 
-    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
-        receptacle = ad.Cylinder(
-            r=d.receptacle_diameter / 2, h=d.thickness + 0.4
+    def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
+        # Raised pedestal around the 4 OLED receptacles.
+        pedestal = ad.Box([
+            d.oled_pedestal_width,
+            d.oled_pedestal_depth,
+            d.oled_pedestal_height,
+        ])
+        # Pedestal bottom at substrate top (z = +d.thickness/2).
+        # Centre at z = thickness/2 + pedestal_height/2.
+        pedestal_z = d.thickness / 2 + d.oled_pedestal_height / 2
+        shape.add_at(
+            pedestal.solid("oled_pedestal")
+            .colour([0.92, 0.88, 0.78])
+            .at("centre"),
+            post=ad.translate([0.0, _J4_Y, pedestal_z]),
         )
+
+        # Support bump under the OLED PCB's north end. Same height as
+        # the pedestal so the OLED PCB sits level.
+        bump = ad.Box([
+            d.oled_support_bump_width,
+            d.oled_support_bump_depth,
+            d.oled_support_bump_height,
+        ])
+        bump_z = d.thickness / 2 + d.oled_support_bump_height / 2
+        shape.add_at(
+            bump.solid("oled_support_bump")
+            .colour([0.92, 0.88, 0.78])
+            .at("centre"),
+            post=ad.translate([
+                d.oled_support_bump_x,
+                d.oled_support_bump_y,
+                bump_z,
+            ]),
+        )
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        # Receptacle goes through both the substrate body (thickness)
+        # AND the raised pedestal (oled_pedestal_height) so the OLED
+        # pin can press all the way through.
+        bore_h = d.thickness + d.oled_pedestal_height + 0.4
+        receptacle = ad.Cylinder(r=d.receptacle_diameter / 2, h=bore_h)
+        # Centre the cylinder so it spans from substrate bottom
+        # (-thickness/2) to pedestal top (+thickness/2 + pedestal_h):
+        #   centre = (substrate_bottom + pedestal_top) / 2
+        #          = pedestal_height / 2
+        receptacle_z = d.oled_pedestal_height / 2
         for i in range(4):
             pt = _sensor_pin(_J4_X, _J4_Y, i + 1)
             shape.add_at(
                 receptacle.hole(f"j4_{i + 1}").at("centre"),
-                post=ad.translate([pt.x, pt.y, 0]),
+                post=ad.translate([pt.x, pt.y, receptacle_z]),
             )
