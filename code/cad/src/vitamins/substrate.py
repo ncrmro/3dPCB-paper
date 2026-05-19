@@ -313,9 +313,33 @@ class Tier1Substrate(ad.CompositeShape):
                 post=ad.translate([pt.x, pt.y, 0]),
             )
 
-        for i in range(9):
-            punch_hole(_esp32_pin(_J1A_X, _J1A_Y, i + 1), f"j1a_{i + 1}")
-            punch_hole(_esp32_pin(_J1B_X, _J1B_Y, i + 1), f"j1b_{i + 1}")
+        # ESP32 columns: only punch holes for pins that carry a routed
+        # bus signal. The SuperMini has 9 + 9 pins but only 4 are
+        # wired on this design (J1A.2 GND, J1A.3 +3V3, J1B.1 SDA,
+        # J1B.2 SCL). Skipping the other 14 saves ~20 % of slicer
+        # output complexity and meaningful print time, with no
+        # functional cost: the ESP32 mounts either bare-pin (only the
+        # 4 needed pins soldered) or with the unused pre-soldered
+        # pins trimmed flush before insertion. The 4 routed holes
+        # plus the inlay pocket walls keep the module aligned.
+        routed_esp_pins: set[tuple[str, int]] = set()
+        for net in self._routed_nets().values():
+            mp = net.master_pin
+            if mp.ref in ("J1A", "J1B"):
+                routed_esp_pins.add((mp.ref, mp.number))
+
+        for ref, x_anchor in (("J1A", _J1A_X), ("J1B", _J1B_X)):
+            for i in range(9):
+                if (ref, i + 1) not in routed_esp_pins:
+                    continue
+                punch_hole(
+                    _esp32_pin(x_anchor, _J1A_Y, i + 1),
+                    f"{ref.lower()}_{i + 1}",
+                )
+
+        # Sensor headers stay fully populated — they come from the
+        # vendor with all pins pre-soldered and need every hole to
+        # seat into the pocket.
         for i in range(4):
             punch_hole(_sensor_pin(_J2_X, _J2_Y, i + 1), f"j2_{i + 1}")
         for i in range(5):
