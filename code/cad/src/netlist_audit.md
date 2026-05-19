@@ -67,22 +67,41 @@ Date of audit: **2026-05-18**. Auditor: Nicholas Romero.
 - **Vitamin class**: `Bh1750Dimensions` (`vitamins/sensors.py`).
 - **Reference orientation**: 5-pin header J3 on one short edge of
   the board; silkscreen labels printed alongside.
-- **Pin-1 marker**: silkscreen reads
-  **"VCC · GND · SCL · SDA · ADDR"** L→R, with VCC at the pin-1
-  end. The usini KiCad footprint
-  (`code/kicad/footprints/usini_sensors.pretty/module_bh1750.kicad_mod`,
-  attribution in `data/models/bh1750_breakout/ATTRIBUTION.md`)
-  matches: pad 1 is the VCC pad.
+- **Silkscreen order** (reading L→R when display IC is upright):
+  **`VCC · GND · SCL · SDA · ADDR`**.
+- **MISMATCH — footprint pad numbering is reversed**: the usini
+  KiCad footprint (`data/models/bh1750_breakout/module_bh1750.kicad_mod`)
+  numbers its pads in the OPPOSITE order to the silkscreen:
+  ```
+  pad 1 at (0, -10.16)  →  silkscreen ADDR
+  pad 2 at (0,  -7.62)  →  silkscreen SDA
+  pad 3 at (0,  -5.08)  →  silkscreen SCL
+  pad 4 at (0,  -2.54)  →  silkscreen GND
+  pad 5 at (0,   0.00)  →  silkscreen VCC
+  ```
+  The footprint's `(fp_text user <NAME> ...)` lines and the
+  numbered `(pad N ...)` lines confirm this: pad N's coordinates
+  sit at the silkscreen label of the OTHER-END pin.
+- **PINOUT consequence** (recorded in `vitamins/sensors_pinout.py`):
+  the PINOUT follows the FOOTPRINT pad numbers (because
+  `_pin_position(Pin("J3", N))` resolves to the footprint pad-N
+  location), NOT the silkscreen reading order:
+  - J3.1 = ADDR
+  - J3.2 = SDA
+  - J3.3 = SCL
+  - J3.4 = GND
+  - J3.5 = VCC
+- **Confirmed via**: physical inspection of the populated substrate
+  (the v1/v2 STL had the bus signals wired to the wrong physical
+  pins, with VCC reaching the ADDR pin and so on; reversing the
+  PINOUT corrects this without any geometry change).
 - **Source / authority**:
   - `data/models/bh1750_breakout/ATTRIBUTION.md` →
     `usini/usini_kicad_sensors` footprint.
-  - Multiple GY-302 product pages (e.g. SparkFun, generic AliExpress
-    listings) all show the same silkscreen order.
-- **PINOUT** (recorded in `vitamins/sensors_pinout.py`):
-  - J3: `[VCC, GND, SCL, SDA, ADDR]`
-- **Mismatch flags**: none. ADDR is a sensor-local I2C-address-select
-  pin and intentionally NOT a member of `PRIMARY_BUS` (it's tied to
-  ground externally to select the 0x23 address).
+  - Multiple GY-302 product pages confirm the silkscreen order.
+- **ADDR usage**: ADDR is a sensor-local I2C-address-select pin and
+  intentionally NOT a member of `PRIMARY_BUS` (it's tied to ground
+  externally to select the 0x23 address).
 
 ---
 
