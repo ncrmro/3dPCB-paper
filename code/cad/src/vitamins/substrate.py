@@ -92,6 +92,12 @@ _J1B_X = _J1A_X + 17.78
 _J1B_Y = _J1A_Y
 _J2_X, _J2_Y = 5.0, -17.0  # SCD41 pad 1 (rotated so pads run +X)
 _J3_X, _J3_Y = 20.0, -17.0  # BH1750 pad 1
+# OLED (Hosyond SSD1306) header. 4 pins running +X, header at south
+# edge of the substrate so the OLED PCB cantilevers south off the
+# board — this puts the OLED entirely outside the BH1750's xy
+# footprint (BH1750 at x∈[17.9,32.2], y∈[-24.4,-5.6]; OLED PCB at
+# x∈[-13.5,+13.5], y∈[-22,-49]) so the upward light cone stays clear.
+_J4_X, _J4_Y = -3.81, -22.0
 
 
 def _esp32_pin(col_x: float, base_y: float, pin: int) -> Point2D:
@@ -113,6 +119,7 @@ _COLUMN_ANCHORS: dict[str, Tuple[float, float, str]] = {
     "J1B": (_J1B_X, _J1B_Y, "+y"),
     "J2":  (_J2_X,  _J2_Y,  "+x"),
     "J3":  (_J3_X,  _J3_Y,  "+x"),
+    "J4":  (_J4_X,  _J4_Y,  "+x"),
 }
 
 
@@ -131,49 +138,53 @@ def _pin_position(pin: Pin) -> Point2D:
 
 
 def _build_paths_for_net(net: Net) -> List[SignalPath]:
-    """Generate one merged path per net carrying the v2 topology.
+    """Generate one merged path per net, generalised to N devices.
 
-    Each net: ESP pin -> L1 east stub -> L1 north to corridor -> east
-    leg (L1 or L2) to SCD column -> L1 south to SCD pad. From the
-    SCD-column corridor point, the BH branch east leg (L1 or L2)
-    reaches the BH column, then L1 south to the BH pad. Layer
-    transitions materialise as Via elements at the corner points.
+    Topology per net:
+      ESP pin → L1 east stub → L1 north to corner_west at corridor_y →
+      [via to L2 if scd_east_on_l2] → corridor segment to first device
+      corner → [via to L1] → L1 vertical to device pin → corridor
+      segment to next device corner → ... (repeated per device, sorted
+      west-to-east by pin x).
 
-    `net.device_pins` is ordered per `netlist.PRIMARY_BUS.devices`:
-    `[0]` is the SCD-side endpoint, `[1]` is the BH-side endpoint.
+    The L1 vertical to each device pin goes SOUTH when the pin's y is
+    below the corridor (SCD41, BH1750) and NORTH when it's above
+    (cantilevered OLED south of the modules) — the segment's start/end
+    encode the direction, no special handling needed.
+
+    `net.branch_east_on_l2` is retained on the Net dataclass for
+    backwards compatibility but no longer consulted — the corridor
+    layer is now driven entirely by `scd_east_on_l2` (one corridor
+    layer per net, regardless of device count).
     """
     esp = _pin_position(net.master_pin)
-    scd = _pin_position(net.device_pins[0])
-    bh = _pin_position(net.device_pins[1])
-
     elements: List = []
 
     stub_end = Point2D(net.north_x, esp.y)
     corner_west = Point2D(net.north_x, net.corridor_y)
-    corner_scd = Point2D(scd.x, net.corridor_y)
-    corner_bh = Point2D(bh.x, net.corridor_y)
 
     elements.append(WireSegment(esp, stub_end, 1))
     elements.append(WireSegment(stub_end, corner_west, 1))
 
-    if net.scd_east_on_l2:
+    corridor_layer = 2 if net.scd_east_on_l2 else 1
+    if corridor_layer == 2:
         elements.append(Via(corner_west))
-        elements.append(WireSegment(corner_west, corner_scd, 2))
-        elements.append(Via(corner_scd))
-    else:
-        elements.append(WireSegment(corner_west, corner_scd, 1))
 
-    elements.append(WireSegment(corner_scd, scd, 1))
+    # Sort device endpoints west-to-east so the corridor sweeps one
+    # direction across the board.
+    device_endpoints = sorted(
+        (_pin_position(dp) for dp in net.device_pins),
+        key=lambda p: p.x,
+    )
 
-    if net.branch_east_on_l2:
-        if not net.scd_east_on_l2:
-            elements.append(Via(corner_scd))
-        elements.append(WireSegment(corner_scd, corner_bh, 2))
-        elements.append(Via(corner_bh))
-    else:
-        elements.append(WireSegment(corner_scd, corner_bh, 1))
-
-    elements.append(WireSegment(corner_bh, bh, 1))
+    prev_corner = corner_west
+    for dev_pos in device_endpoints:
+        dev_corner = Point2D(dev_pos.x, net.corridor_y)
+        elements.append(WireSegment(prev_corner, dev_corner, corridor_layer))
+        if corridor_layer == 2:
+            elements.append(Via(dev_corner))
+        elements.append(WireSegment(dev_corner, dev_pos, 1))
+        prev_corner = dev_corner
 
     return [SignalPath(name=net.signal.name.lower(), elements=tuple(elements))]
 
@@ -193,6 +204,11 @@ class Tier1SubstrateDimensions:
     via_diameter: float = 1.5
     pocket_clearance: float = 0.3
     overcut: float = 0.1
+    # Receptacle hole diameter for OLED male DuPont pin (~0.64 mm pin).
+    # Smaller than `hole_diameter` so the printed plastic grips by
+    # interference fit. 0.6 mm is a first-pass target for a 0.2 mm
+    # layer FDM print; iterate per print.
+    receptacle_diameter: float = 0.6
     esp32: Esp32C3SuperminiDimensions = field(default_factory=Esp32C3SuperminiDimensions)
     scd41: Scd41Dimensions = field(default_factory=Scd41Dimensions)
     bh1750: Bh1750Dimensions = field(default_factory=Bh1750Dimensions)
@@ -219,10 +235,22 @@ class Tier1Substrate(ad.CompositeShape):
 
         # ---- module pin through-holes ---------------------------------
         hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
+        receptacle = ad.Cylinder(
+            r=d.receptacle_diameter / 2, h=d.thickness + 0.4
+        )
 
         def punch_hole(pt: Point2D, name: str) -> None:
             shape.add_at(
                 hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+
+        def punch_receptacle(pt: Point2D, name: str) -> None:
+            """OLED-only pressure-fit pocket: a slightly-undersized
+            cylindrical hole so the printed plastic grips the pin by
+            interference fit instead of clearing it."""
+            shape.add_at(
+                receptacle.hole(name).at("centre"),
                 post=ad.translate([pt.x, pt.y, 0]),
             )
 
@@ -233,6 +261,13 @@ class Tier1Substrate(ad.CompositeShape):
             punch_hole(_sensor_pin(_J2_X, _J2_Y, i + 1), f"j2_{i + 1}")
         for i in range(5):
             punch_hole(_sensor_pin(_J3_X, _J3_Y, i + 1), f"j3_{i + 1}")
+        # OLED header — 4 pressure-fit receptacles south of the
+        # module pockets. These are the *only* receptacles on the
+        # substrate; every other pin position is a plain through-hole.
+        for i in range(4):
+            punch_receptacle(
+                _sensor_pin(_J4_X, _J4_Y, i + 1), f"j4_{i + 1}"
+            )
 
         # ---- module pockets -------------------------------------------
         def punch_pocket(cx: float, cy: float, w: float, h: float,

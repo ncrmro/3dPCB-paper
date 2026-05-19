@@ -114,7 +114,7 @@ PRIMARY_BUS = Bus(
     signals=(I2cSignal.VCC, I2cSignal.GND, I2cSignal.SCL, I2cSignal.SDA),
     master="ESP32",
     master_columns=("J1A", "J1B"),
-    devices=("SCD41", "BH1750"),
+    devices=("SCD41", "BH1750", "OLED"),
 )
 
 
@@ -215,13 +215,18 @@ def _build_nets() -> dict[I2cSignal, Net]:
     # Import the pure-data PINOUT siblings — they don't pull anchorscad,
     # so this works in both the cad and KiCad flake Python envs.
     from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT  # noqa: E402
+    from vitamins.oled_ssd1306_pinout import OLED_PINOUT  # noqa: E402
     from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT  # noqa: E402
 
     return _assemble_nets(
         bus=PRIMARY_BUS,
         routing=ROUTING,
         master_columns={"J1A": J1A_PINOUT, "J1B": J1B_PINOUT},
-        devices={"SCD41": SCD41_PINOUT, "BH1750": BH1750_PINOUT},
+        devices={
+            "SCD41": SCD41_PINOUT,
+            "BH1750": BH1750_PINOUT,
+            "OLED": OLED_PINOUT,
+        },
     )
 
 
