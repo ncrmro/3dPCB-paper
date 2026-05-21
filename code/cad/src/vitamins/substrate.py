@@ -962,7 +962,14 @@ class Tier1Substrate(ad.CompositeShape):
         PCB. The voxel test uses this list to forbid L2 wires in
         sensor pocket xy. OLED PCB is excluded: it sits above the
         pedestal at z≈+9, well clear of L2's z=+0.7..+1.5 band, so
-        L2 wires under the OLED PCB don't make contact."""
+        L2 wires under the OLED PCB don't make contact.
+
+        This is the CONSERVATIVE model — the full PCB back is treated
+        as forbidden. Most module backs are silkscreened or
+        soldermask-covered with only specific regions (pin barrels,
+        exposed traces) actually conductive. See
+        `docs/module_back_conductivity.md` for the per-module audit
+        and the future refinement plan."""
         d = self.dim
         esp_cx = (_J1A_X + _J1B_X) / 2
         esp_cy = _J1A_Y + 4 * _PITCH

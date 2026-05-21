@@ -22,8 +22,6 @@ its routed nets via `_routed_nets()`.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from vitamins.substrate import (
@@ -33,19 +31,13 @@ from vitamins.substrate import (
     Tier2SubstrateBundled,
     WireSegment,
 )
-
-
-# Voxel grid resolution. 0.1 mm gives 8 voxels across an 0.8 mm channel
-# and 5 voxels across a 1.0 mm pin hole — fine enough that two channels
-# laid side-by-side with 0 mm clearance both claim the same boundary
-# voxel column and the test flags them.
-_VOXEL_RES = 0.1
-
-_BOARD_W = 80.0
-_BOARD_H = 50.0
-_THICKNESS = 3.0
-_CHANNEL_WIDTH = 0.8
-_CHANNEL_DEPTH = 0.8
+from voxel_grid import (
+    voxels_in_pcb_footprint_l2 as _voxels_in_pcb_footprint_l2,
+    voxels_in_segment as _voxels_in_segment,
+    voxels_in_through_hole as _voxels_in_through_hole,
+    vx_world as _vx_world,
+    vy_world as _vy_world,
+)
 
 
 @pytest.fixture(
@@ -54,124 +46,6 @@ _CHANNEL_DEPTH = 0.8
 )
 def substrate(request):
     return request.param()
-
-
-# --- voxel coordinates -------------------------------------------------------
-
-
-def _to_vx(x: float) -> int:
-    return int(math.floor((x + _BOARD_W / 2) / _VOXEL_RES))
-
-
-def _to_vy(y: float) -> int:
-    return int(math.floor((y + _BOARD_H / 2) / _VOXEL_RES))
-
-
-def _to_vz(z: float) -> int:
-    return int(math.floor((z + _THICKNESS / 2) / _VOXEL_RES))
-
-
-def _vx_world(vx: int) -> float:
-    return (vx + 0.5) * _VOXEL_RES - _BOARD_W / 2
-
-
-def _vy_world(vy: int) -> float:
-    return (vy + 0.5) * _VOXEL_RES - _BOARD_H / 2
-
-
-# --- rasterizers -------------------------------------------------------------
-
-
-def _voxels_in_segment(seg: WireSegment, buffer: float = 0.0):
-    """Yield (vx, vy, vz) for every voxel inside the segment's
-    channel-volume inflated by `buffer` mm perpendicular to the
-    segment — full inflated width is `_CHANNEL_WIDTH + 2*buffer`,
-    depth stays `_CHANNEL_DEPTH` on the appropriate layer face.
-
-    z is NOT inflated: L1 (substrate bottom) and L2 (substrate top)
-    are vertically separated by ~1.4 mm of substrate body — a wall
-    much thicker than the printable floor, so even a buffered L1
-    channel doesn't reach into the L2 z-band."""
-    cw = _CHANNEL_WIDTH + 2.0 * buffer
-    cd = _CHANNEL_DEPTH
-    if seg.layer == 1:
-        z_lo = -_THICKNESS / 2
-        z_hi = z_lo + cd
-    else:
-        z_hi = _THICKNESS / 2
-        z_lo = z_hi - cd
-
-    dx = seg.end.x - seg.start.x
-    dy = seg.end.y - seg.start.y
-    L = math.hypot(dx, dy)
-    if L < 1e-9:
-        return
-    ux, uy = dx / L, dy / L
-    nx, ny = -uy, ux  # unit normal
-
-    bx_lo = min(seg.start.x, seg.end.x) - cw
-    bx_hi = max(seg.start.x, seg.end.x) + cw
-    by_lo = min(seg.start.y, seg.end.y) - cw
-    by_hi = max(seg.start.y, seg.end.y) + cw
-
-    vxl, vxh = _to_vx(bx_lo), _to_vx(bx_hi)
-    vyl, vyh = _to_vy(by_lo), _to_vy(by_hi)
-    vzl, vzh = _to_vz(z_lo), _to_vz(z_hi)
-
-    half_w = cw / 2
-    along_pad = buffer + _VOXEL_RES / 2  # extend segment ends by buffer too
-    for vx in range(vxl, vxh + 1):
-        wx = _vx_world(vx)
-        for vy in range(vyl, vyh + 1):
-            wy = _vy_world(vy)
-            ax = wx - seg.start.x
-            ay = wy - seg.start.y
-            along = ax * ux + ay * uy
-            if along < -along_pad or along > L + along_pad:
-                continue
-            perp = abs(ax * nx + ay * ny)
-            if perp > half_w:
-                continue
-            for vz in range(vzl, vzh + 1):
-                yield (vx, vy, vz)
-
-
-def _voxels_in_through_hole(cx: float, cy: float, diam: float, buffer: float = 0.0):
-    """Yield voxels for a through-hole cylinder inflated by `buffer`
-    mm: substrate-bottom to substrate-top, radius (diam/2 + buffer)
-    around (cx, cy)."""
-    r = diam / 2 + buffer
-    r_sq = r * r
-    vxl, vxh = _to_vx(cx - r), _to_vx(cx + r)
-    vyl, vyh = _to_vy(cy - r), _to_vy(cy + r)
-    vzl, vzh = _to_vz(-_THICKNESS / 2), _to_vz(_THICKNESS / 2 - 1e-9)
-    for vx in range(vxl, vxh + 1):
-        wx = _vx_world(vx)
-        dx_sq = (wx - cx) ** 2
-        if dx_sq > r_sq:
-            continue
-        for vy in range(vyl, vyh + 1):
-            wy = _vy_world(vy)
-            if dx_sq + (wy - cy) ** 2 > r_sq:
-                continue
-            for vz in range(vzl, vzh + 1):
-                yield (vx, vy, vz)
-
-
-def _voxels_in_pcb_footprint_l2(cx: float, cy: float, half_w: float, half_l: float):
-    """Yield voxels at the L2 z-band inside a module PCB's xy
-    footprint. The PCB sits in the pocket cavity at z = +0.7..+1.5,
-    occupying the same band as L2 routing channels — any L2 wire
-    voxel here would short into the PCB."""
-    z_hi = _THICKNESS / 2
-    z_lo = z_hi - _CHANNEL_DEPTH
-    vxl, vxh = _to_vx(cx - half_w), _to_vx(cx + half_w)
-    vyl, vyh = _to_vy(cy - half_l), _to_vy(cy + half_l)
-    vzl, vzh = _to_vz(z_lo), _to_vz(z_hi - 1e-9)
-    for vx in range(vxl, vxh + 1):
-        for vy in range(vyl, vyh + 1):
-            for vz in range(vzl, vzh + 1):
-                yield (vx, vy, vz)
 
 
 # --- ownership lookup --------------------------------------------------------
