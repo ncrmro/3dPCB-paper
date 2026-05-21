@@ -32,6 +32,7 @@ another net's L1 vertical; SDA (corridor y +15) is high enough that
 its east leg can stay on L1.
 """
 
+import math
 from dataclasses import dataclass, field
 from typing import List, Tuple, Union
 
@@ -97,7 +98,7 @@ _J3_X, _J3_Y = 20.0, -17.0  # BH1750 pad 1
 # board — this puts the OLED entirely outside the BH1750's xy
 # footprint (BH1750 at x∈[17.9,32.2], y∈[-24.4,-5.6]; OLED PCB at
 # x∈[-13.5,+13.5], y∈[-22,-49]) so the upward light cone stays clear.
-_J4_X, _J4_Y = -3.81, -22.0
+_J4_X, _J4_Y = -3.81, 10.0
 
 
 def _esp32_pin(col_x: float, base_y: float, pin: int) -> Point2D:
@@ -135,6 +136,317 @@ def _pin_position(pin: Pin) -> Point2D:
     if axis == "+x":
         return Point2D(x0 + offset, y0)
     raise ValueError(f"unsupported axis {axis!r} for column {pin.ref}")
+
+
+def _build_south_band_paths(
+    signal_strip_ys: dict,  # {I2cSignal: strip_y_float}
+    nets: dict,
+    visit_order: List[str],
+) -> List[SignalPath]:
+    """South-band snake-through-holes topology for power signals.
+
+    Each signal's wire is one continuous strand that:
+      master pin (terminal, 1 hole)
+        → 45° SE on L1 to its bottom strip
+        → east along strip on L1
+        → 45° NE on L1 up to non-terminal pin hole
+        → 45° SE on L2 (top) to the paired return hole
+        → wire continues back DOWN through return to the strip
+        → east along strip on L1
+        → ... repeat at each non-terminal ...
+        → 45° SW on L1 down to OLED terminal pin (terminal, 1 hole)
+
+    Strips live in the y∈(-25, -17) band — between sensor pin row
+    and substrate south edge. Each non-terminal device pin needs a
+    *return hole* drilled at (pin.x + rise, strip_y), drilled by the
+    subclass's `_punch_extra_holes`.
+
+    Note: approaches at one signal's strip y must pass through any
+    other signal's strip y on the way to the pin row. For example, a
+    GND approach (strip y=-21) reaching the sensor pin row at y=-17
+    crosses y=-19 (VCC strip) along the way — if VCC strip is cut
+    there, the two L1 channels intersect and the bare wires would
+    touch at the crossing. Acceptable when insulated wire is used,
+    or addressed with L2+vias for the crossings in a future revision.
+    """
+    DEV_TO_COL = {"SCD41": "J2", "BH1750": "J3", "OLED": "J4"}
+
+    paths: List[SignalPath] = []
+    for sig, strip_y in signal_strip_ys.items():
+        net = nets[sig]
+        elements: List = []
+        other_strip_ys = [y for s, y in signal_strip_ys.items() if s != sig]
+
+        master = _pin_position(net.master_pin)
+        master_rise = master.y - strip_y
+        strip_entry = Point2D(master.x + master_rise, strip_y)
+        elements.append(WireSegment(master, strip_entry, 1))
+
+        device_keys = [d for d in visit_order if d != "ESP32"]
+        prev_strip_pt = strip_entry
+        for i, dev_key in enumerate(device_keys):
+            col = DEV_TO_COL.get(dev_key)
+            if col is None:
+                continue
+            pin = next((p for p in net.device_pins if p.ref == col), None)
+            if pin is None:
+                continue
+            dev_pos = _pin_position(pin)
+            rise = dev_pos.y - strip_y
+
+            if abs(rise) > 0.01:
+                approach_start = Point2D(dev_pos.x - rise, strip_y)
+                # Route the diagonal on L2 (with an L1→L2 via at
+                # approach_start) when an L1 diagonal would cross
+                # another signal's strip — typical for the OLED VCC
+                # approach, which would otherwise nick the GND strip
+                # at (x≈2.27, y=-21) on L1.
+                y_lo, y_hi = min(strip_y, dev_pos.y), max(strip_y, dev_pos.y)
+                crosses_other = any(y_lo < y < y_hi for y in other_strip_ys)
+                diag_layer = 2 if crosses_other else 1
+                if abs(prev_strip_pt.x - approach_start.x) > 0.01:
+                    elements.append(WireSegment(prev_strip_pt, approach_start, 1))
+                elements.append(WireSegment(approach_start, dev_pos, diag_layer))
+            else:
+                if abs(prev_strip_pt.x - dev_pos.x) > 0.01:
+                    elements.append(WireSegment(prev_strip_pt, dev_pos, 1))
+
+            is_terminal = (i == len(device_keys) - 1)
+            if is_terminal:
+                break
+
+            return_pt = Point2D(dev_pos.x + rise, strip_y)
+            elements.append(WireSegment(dev_pos, return_pt, 2))
+            prev_strip_pt = return_pt
+
+        paths.append(SignalPath(name=sig.name.lower(), elements=tuple(elements)))
+
+    return paths
+
+
+def _south_band_approach_via_positions(
+    signal_strip_ys: dict,
+    nets: dict,
+    visit_order: List[str],
+) -> list[tuple[Point2D, str]]:
+    """L1→L2 transition vias drilled at approach_start whenever the
+    south-band diagonal had to be routed on L2 to avoid crossing
+    another signal's L1 strip (see `_build_south_band_paths`)."""
+    DEV_TO_COL = {"SCD41": "J2", "BH1750": "J3", "OLED": "J4"}
+    out: list[tuple[Point2D, str]] = []
+    for sig, strip_y in signal_strip_ys.items():
+        net = nets[sig]
+        other_strip_ys = [y for s, y in signal_strip_ys.items() if s != sig]
+        for dev_key in [d for d in visit_order if d != "ESP32"]:
+            col = DEV_TO_COL.get(dev_key)
+            if col is None:
+                continue
+            pin = next((p for p in net.device_pins if p.ref == col), None)
+            if pin is None:
+                continue
+            dev_pos = _pin_position(pin)
+            rise = dev_pos.y - strip_y
+            if abs(rise) <= 0.01:
+                continue
+            y_lo, y_hi = min(strip_y, dev_pos.y), max(strip_y, dev_pos.y)
+            if not any(y_lo < y < y_hi for y in other_strip_ys):
+                continue
+            approach_start = Point2D(dev_pos.x - rise, strip_y)
+            out.append((
+                approach_start,
+                f"{sig.name.lower()}_approach_{col.lower()}",
+            ))
+    return out
+
+
+_BRIDGE_OFFSET = 0.5  # mm above/below crossed corridor for L2→L1→L2 jog
+
+
+def _build_top_layer_paths(
+    signals,
+    nets: dict,
+    corridor_ys: dict,
+    via_escape_xs: dict,
+    chamfer_length: float = 1.0,
+    visit_order=("ESP32", "SCD41", "BH1750", "OLED"),
+) -> List[SignalPath]:
+    """Top-layer threading topology for bus signals (SCL, SDA).
+
+    Per signal, the wire path:
+      master pin (J1B, inside ESP32 pocket)
+        → L1 east stub on bottom past ESP32 pocket east wall
+        → via at (via_escape_xs[signal], master.y): L1 → L2 transition
+        → L2 north to corridor at corridor_ys[signal]
+        → L2 corridor east (through OLED PCB shadow)
+        → at each sensor pin: 45° SE chamfer to pickup via at (pin.x,
+          via_pickup_y) → L1 vertical south to pin → wire returns
+          back up the same L1 channel → 45° NE chamfer back to corridor
+        → corridor continues east past last sensor pickup, then west
+        → at OLED terminal: 45° SW chamfer + L2 south descent to
+          OLED pin at y=-22 (passes through pedestal area; pedestal
+          stays attached via surrounding intact substrate)
+
+    Each signal needs a unique `via_escape_xs[signal]` so the L2
+    north escape segments don't overlap on top of the substrate. When
+    the OLED descent crosses a lower signal's L2 corridor, a via pair
+    (L2→L1→L2) bridges around the corridor — the L1 jog is short
+    (~1 mm) and well clear of any L1 power strip.
+    """
+    DEV_TO_COL = {"SCD41": "J2", "BH1750": "J3", "OLED": "J4"}
+
+    paths: List[SignalPath] = []
+    c = chamfer_length
+    for sig in signals:
+        net = nets[sig]
+        corridor_y = corridor_ys[sig]
+        via_escape_x = via_escape_xs[sig]
+        # pickup_y derived from corridor_y so chamfer is always 45° (1×1mm).
+        pickup_y = corridor_y - c
+        other_corridor_ys = [y for s, y in corridor_ys.items() if s != sig]
+        elements: List = []
+
+        master = _pin_position(net.master_pin)
+        escape_via = Point2D(via_escape_x, master.y)
+        corridor_entry = Point2D(via_escape_x, corridor_y)
+
+        # L1 east stub from master to escape via on bottom face.
+        elements.append(WireSegment(master, escape_via, 1))
+        # L2 north from escape via to corridor on top face.
+        elements.append(WireSegment(escape_via, corridor_entry, 2))
+
+        device_keys = [d for d in visit_order if d != "ESP32"]
+        prev_corridor_pt = corridor_entry
+        for i, dev_key in enumerate(device_keys):
+            col = DEV_TO_COL.get(dev_key)
+            pin = next((p for p in net.device_pins if p.ref == col), None)
+            if pin is None:
+                continue
+            dev_pos = _pin_position(pin)
+            is_terminal = (i == len(device_keys) - 1)
+
+            if is_terminal:
+                # OLED terminal: corridor → 45° SW chamfer → L2 south to pin.
+                chamfer_top = Point2D(dev_pos.x + c, corridor_y)
+                chamfer_bot = Point2D(dev_pos.x, pickup_y)
+                if abs(prev_corridor_pt.x - chamfer_top.x) > 0.01:
+                    elements.append(WireSegment(prev_corridor_pt, chamfer_top, 2))
+                elements.append(WireSegment(chamfer_top, chamfer_bot, 2))
+                # Bridge around any lower L2 corridor the descent would cross.
+                blockers = sorted(
+                    [y for y in other_corridor_ys
+                     if dev_pos.y < y < chamfer_bot.y],
+                    reverse=True,
+                )
+                cur_pt = chamfer_bot
+                for y_block in blockers:
+                    top_via = Point2D(dev_pos.x, y_block + _BRIDGE_OFFSET)
+                    bot_via = Point2D(dev_pos.x, y_block - _BRIDGE_OFFSET)
+                    if abs(cur_pt.y - top_via.y) > 0.01:
+                        elements.append(WireSegment(cur_pt, top_via, 2))
+                    elements.append(WireSegment(top_via, bot_via, 1))
+                    cur_pt = bot_via
+                elements.append(WireSegment(cur_pt, dev_pos, 2))
+            else:
+                pickup_via = Point2D(dev_pos.x, pickup_y)
+                chamfer_in = Point2D(dev_pos.x - c, corridor_y)
+                chamfer_out = Point2D(dev_pos.x + c, corridor_y)
+                if abs(prev_corridor_pt.x - chamfer_in.x) > 0.01:
+                    elements.append(WireSegment(prev_corridor_pt, chamfer_in, 2))
+                # 45° SE diagonal on L2 from corridor down to pickup via.
+                elements.append(WireSegment(chamfer_in, pickup_via, 2))
+                # L1 vertical from via to pin on bottom face.
+                elements.append(WireSegment(pickup_via, dev_pos, 1))
+                # 45° NE diagonal on L2 from pickup via back to corridor.
+                elements.append(WireSegment(pickup_via, chamfer_out, 2))
+                prev_corridor_pt = chamfer_out
+
+        paths.append(SignalPath(name=sig.name.lower(), elements=tuple(elements)))
+
+    return paths
+
+
+def _top_layer_via_positions(
+    signals,
+    nets: dict,
+    corridor_ys: dict,
+    via_escape_xs: dict,
+    chamfer_length: float = 1.0,
+    visit_order=("ESP32", "SCD41", "BH1750", "OLED"),
+) -> list[tuple[Point2D, str]]:
+    """Through-substrate vias for L1↔L2 transitions in the top-layer
+    threading topology. Per signal: master escape near J1B, one pickup
+    via per non-terminal sensor pin, plus a via pair around each lower
+    L2 corridor the terminal descent must cross."""
+    DEV_TO_COL = {"SCD41": "J2", "BH1750": "J3", "OLED": "J4"}
+    out: list[tuple[Point2D, str]] = []
+    for sig in signals:
+        net = nets[sig]
+        corridor_y = corridor_ys[sig]
+        pickup_y = corridor_y - chamfer_length
+        master = _pin_position(net.master_pin)
+        out.append((
+            Point2D(via_escape_xs[sig], master.y),
+            f"{sig.name.lower()}_escape_via",
+        ))
+        device_keys = [d for d in visit_order if d != "ESP32"]
+        terminal_idx = len(device_keys) - 1
+        for i, dev_key in enumerate(device_keys):
+            col = DEV_TO_COL.get(dev_key)
+            pin = next((p for p in net.device_pins if p.ref == col), None)
+            if pin is None:
+                continue
+            dev_pos = _pin_position(pin)
+            if i == terminal_idx:
+                # Bridge vias around any lower L2 corridor on the descent.
+                other_corridor_ys = [
+                    y for s, y in corridor_ys.items() if s != sig
+                ]
+                blockers = sorted(
+                    [y for y in other_corridor_ys
+                     if dev_pos.y < y < pickup_y],
+                    reverse=True,
+                )
+                for j, y_block in enumerate(blockers):
+                    out.append((
+                        Point2D(dev_pos.x, y_block + _BRIDGE_OFFSET),
+                        f"{sig.name.lower()}_bridge_top_{j}",
+                    ))
+                    out.append((
+                        Point2D(dev_pos.x, y_block - _BRIDGE_OFFSET),
+                        f"{sig.name.lower()}_bridge_bot_{j}",
+                    ))
+                continue
+            out.append((
+                Point2D(dev_pos.x, pickup_y),
+                f"{sig.name.lower()}_pickup_{col.lower()}",
+            ))
+    return out
+
+
+def _south_band_return_holes(
+    signal_strip_ys: dict,
+    nets: dict,
+    visit_order: List[str],
+) -> list[tuple[Point2D, str]]:
+    """Return holes for every non-terminal device pin in the south band."""
+    DEV_TO_COL = {"SCD41": "J2", "BH1750": "J3", "OLED": "J4"}
+    out: list[tuple[Point2D, str]] = []
+    device_keys = [d for d in visit_order if d != "ESP32"]
+    if not device_keys:
+        return out
+    non_terminals = device_keys[:-1]
+    for sig, strip_y in signal_strip_ys.items():
+        net = nets[sig]
+        for dev_key in non_terminals:
+            col = DEV_TO_COL.get(dev_key)
+            pin = next((p for p in net.device_pins if p.ref == col), None)
+            if pin is None:
+                continue
+            dev_pos = _pin_position(pin)
+            rise = dev_pos.y - strip_y
+            return_pt = Point2D(dev_pos.x + rise, strip_y)
+            out.append((return_pt, f"{sig.name.lower()}_return_{col.lower()}"))
+    return out
 
 
 def _build_paths_for_net(net: Net) -> List[SignalPath]:
@@ -187,6 +499,254 @@ def _build_paths_for_net(net: Net) -> List[SignalPath]:
         prev_corner = dev_corner
 
     return [SignalPath(name=net.signal.name.lower(), elements=tuple(elements))]
+
+
+# ---------------------------------------------------------------------------
+# ESP32 → OLED power-only snake (Tier 2 minimal topology)
+# ---------------------------------------------------------------------------
+
+# Each power signal's L1 east-west "highway" y. With the OLED mounted
+# silkscreen-up (J4.1=GND west, J4.2=VCC just east), VCC's L1 east
+# leg must cross GND's pin-column at x=-3.81 on its way to x=-1.27 —
+# so VCC's east leg has to live at a y OUTSIDE GND's final-vertical
+# y range [+5, +10]. Choosing y=+12 (just north of the pedestal,
+# above the OLED pin row) keeps the crossing on different y; VCC
+# then drops back south on L1 from (vcc_target, +12) to the OLED pin
+# at (vcc_target, +10).
+_OLED_ONLY_HIGHWAY_YS = {
+    "VCC": 12.0,
+    "GND": 5.0,
+}
+
+# L1 escape columns INSIDE the ESP32 pocket footprint (pocket x ∈
+# [-26.61, -15.61]). The wire jogs east from the master pin onto this
+# column, then runs north on L1 — i.e. genuinely tunnels under the
+# ESP32 module before exiting the pocket north edge. VCC is placed
+# WEST of GND so the VCC east-jog (at vcc_master.y, between the two
+# L1 verticals) doesn't traverse GND's vertical column — otherwise
+# the stub would cross GND's L1 north leg at (gnd_escape_x, vcc_master.y).
+_OLED_ONLY_ESCAPE_XS = {
+    "VCC": -25.0,
+    "GND": -22.0,
+}
+
+# Distance south of each OLED pin for the L2 stub + return hole. With
+# the pedestal at (0, +10) (y ∈ [+8, +12]), -4 mm puts the return hole
+# at y=+6 — south of the pedestal in intact substrate, on the path
+# toward the SCD41 pin row at y=-17. The L2 stub's first 2 mm runs
+# under the pedestal (acceptable undercut); the rest is clear.
+_OLED_ONLY_RETURN_OFFSET = -4.0
+
+# y-corridor for the L1 continuation east-leg between the OLED-return
+# x column and the SCD41/BH1750 pin x columns. Each signal gets a
+# unique y to keep east legs on the same layer from sharing a row.
+#   GND  -19  — south of every pocket south edge
+#   VCC  -16  — between J1B.1 row (-17) and J1B.2 row (-14.46)
+#   SCL  -15  — south of J1B.2 (-14.46), north of VCC's east leg
+#   SDA  -14  — north of J1B.2, south of J1B.3 (-11.92)
+# SCL/SDA stubs into their SCD41 pin cross VCC's east leg at y=-16;
+# those crossings are bridged with a short L2 segment + 2 vias.
+_SCD41_CORRIDOR_YS = {
+    "VCC": -16.0,
+    "GND": -19.0,
+    "SCL": -15.0,
+    "SDA": -14.0,
+}
+
+# Bus-signal master-to-OLED routing lives on L2 (the substrate's top
+# face) so it doesn't fight the existing VCC/GND L1 east legs. Each
+# bus signal wraps up through its J1B master pin onto L2, runs L2 to
+# the OLED pin, and only descends to L1 after the OLED return hole.
+#
+# SCL: master at J1B.2 (-12.22, -14.46). Direct L2 north → east →
+#   south path to OLED J4.3 at (+1.27, +10). No east-jog needed —
+#   the master column at x=-12.22 has no other drilled J1B pin
+#   between J1B.2 and the highway y, so the L2 north leg is clear.
+# SDA: master at J1B.1 (-12.22, -17). L2 north at x=-12.22 would
+#   pass through the SCL master pin hole at J1B.2 (foreign-pin
+#   intrusion). SDA detours: L2 south to y=-21 below every pocket,
+#   L2 east to x=+17 (in the open gap between SCD41 and BH1750
+#   pockets), L2 north up to the highway, L2 west to OLED column.
+_BUS_HIGHWAY_YS = {"SCL": 13.0, "SDA": 14.0}
+_SDA_SOUTH_DETOUR_Y = -21.0
+_SDA_ESCAPE_X = 17.0  # between SCD41 (x≤15.46) and BH1750 (x≥18.08) pockets
+
+# Each SCL/SDA stub into its SCD41 pin crosses VCC's east leg at
+# y=-16. An L2 bridge with via diameter 1.5 mm needs >=0.75 mm
+# clearance from VCC's channel — so bridge endpoints are placed at
+# y=-14.0 (north, well clear of VCC's 0.8 mm channel at y=-16) and
+# y=-17.5 (south, between VCC east and GND east, just south of the
+# sensor pin row). The bottom via overlaps the SCD41 pin hole in xy
+# — that's deliberate, both belong to the same signal so they
+# union into one continuous opening.
+_BUS_BRIDGE_TOP_YS = {"SCL": -14.0, "SDA": -13.0}
+_BUS_BRIDGE_BOTTOM_Y = -17.5
+
+
+def _build_oled_only_power_paths(nets: dict) -> List[SignalPath]:
+    """One snake per power signal: master → OLED → SCD41 → BH1750.
+
+    Topology:
+      master (J1A, on L1)
+        → L1 east jog onto an escape column inside the ESP32 pocket
+        → L1 north under the ESP32, out the pocket footprint, to the
+          highway y in the open north band (VCC's highway is above the
+          OLED pin row at y=+12, GND's is below at y=+5)
+        → L1 east along the highway to the OLED pin's x column
+        → L1 vertical onto the OLED pin (north for GND, south for VCC)
+        → L2 stub SOUTH from the OLED pin, 4 mm past the pedestal south
+          edge (under-pedestal undercut for the first 2 mm is the price
+          of putting the return hole on the path toward SCD41 instead
+          of north away from it)
+        → return through-hole at (oled_x, +6): L2 → L1
+        → L1 south down to the per-signal corridor y, east along that
+          corridor to (scd_x, corridor_y), and a north stub up to the
+          SCD41 pin — the wire enters the pin from the corridor side
+        → wire wraps around the SCD41 pin and returns to the corridor:
+          the model emits a second east leg starting back at
+          (scd_x, corridor_y) and running east to the BH1750 pin's x
+          column, ending with a north stub up to the BH1750 pin
+          (J3.2 for GND, J3.1 for VCC)
+    """
+    from netlist import I2cSignal
+    paths: List[SignalPath] = []
+    sig_map = {"VCC": I2cSignal.VCC, "GND": I2cSignal.GND}
+    for name, sig in sig_map.items():
+        net = nets.get(sig)
+        if net is None:
+            continue
+        oled_pin = next((p for p in net.device_pins if p.ref == "J4"), None)
+        scd41_pin = next((p for p in net.device_pins if p.ref == "J2"), None)
+        bh1750_pin = next((p for p in net.device_pins if p.ref == "J3"), None)
+        if oled_pin is None or scd41_pin is None:
+            continue
+
+        master = _pin_position(net.master_pin)
+        oled_xy = _pin_position(oled_pin)
+        scd_xy = _pin_position(scd41_pin)
+        bh_xy = _pin_position(bh1750_pin) if bh1750_pin is not None else None
+        escape_x = _OLED_ONLY_ESCAPE_XS[name]
+        hy = _OLED_ONLY_HIGHWAY_YS[name]
+        return_y = oled_xy.y + _OLED_ONLY_RETURN_OFFSET
+        corridor_y = _SCD41_CORRIDOR_YS[name]
+
+        elements: List = []
+
+        # Master → OLED on L1, with an L2 stub south to the return hole.
+        cur = master
+        if abs(escape_x - master.x) > 0.01:
+            jog = Point2D(escape_x, master.y)
+            elements.append(WireSegment(cur, jog, 1))
+            cur = jog
+        rise = Point2D(cur.x, hy)
+        elements.append(WireSegment(cur, rise, 1))
+        east = Point2D(oled_xy.x, hy)
+        elements.append(WireSegment(rise, east, 1))
+        elements.append(WireSegment(east, oled_xy, 1))  # final vertical onto OLED pin
+        return_xy = Point2D(oled_xy.x, return_y)
+        elements.append(WireSegment(oled_xy, return_xy, 2))  # L2 stub south
+
+        # OLED return hole → SCD41 on L1.
+        cont_south = Point2D(oled_xy.x, corridor_y)
+        elements.append(WireSegment(return_xy, cont_south, 1))
+        cont_east = Point2D(scd_xy.x, corridor_y)
+        elements.append(WireSegment(cont_south, cont_east, 1))
+        elements.append(WireSegment(cont_east, scd_xy, 1))  # north stub to SCD41 pin
+
+        # SCD41 → BH1750 along the same corridor; the SCD41 pin acts as
+        # a wire-loop junction. Three L1 segments meet at (scd_x,
+        # corridor_y): the incoming east leg, the north stub up into
+        # the SCD41 pin, and the outgoing east leg toward BH1750.
+        if bh_xy is not None:
+            scd_to_bh = Point2D(bh_xy.x, corridor_y)
+            elements.append(WireSegment(cont_east, scd_to_bh, 1))
+            elements.append(WireSegment(scd_to_bh, bh_xy, 1))  # north stub to BH1750 pin
+
+        paths.append(SignalPath(name=name.lower(), elements=tuple(elements)))
+
+    return paths
+
+
+def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
+    """Master → OLED snake per bus signal (terminal at OLED). The
+    sensor-side extensions (SCL/SDA → SCD41 → BH1750) are deferred —
+    each stub would need an L2 bridge over VCC east at y=-16 AND
+    another over GND east at y=-19, plus careful L2-vs-L2 separation
+    between the two bus signals. That'd cost ~6 extra vias per bus
+    signal and a corridor restructure; left for a follow-up.
+
+    The master-to-OLED leg routes entirely on L2 so it sidesteps
+    every VCC/GND L1 east leg:
+      SCL: L2 north at x=-12.22 (master column), east at y=+13,
+           south to OLED J4.3.
+      SDA: L2 south to y=-21 (below every pocket), east to x=+17
+           (gap between SCD41 and BH1750), north to y=+14, west to
+           OLED J4.4. A direct L2 north at x=-12.22 would punch
+           through SCL's master pin at J1B.2."""
+    from netlist import I2cSignal
+    paths: List[SignalPath] = []
+    sig_map = {"SCL": I2cSignal.SCL, "SDA": I2cSignal.SDA}
+    for name, sig in sig_map.items():
+        net = nets.get(sig)
+        if net is None:
+            continue
+        oled_pin = next((p for p in net.device_pins if p.ref == "J4"), None)
+        if oled_pin is None:
+            continue
+
+        master = _pin_position(net.master_pin)
+        oled_xy = _pin_position(oled_pin)
+        highway_y = _BUS_HIGHWAY_YS[name]
+
+        elements: List = []
+
+        if name == "SDA":
+            south = Point2D(master.x, _SDA_SOUTH_DETOUR_Y)
+            elements.append(WireSegment(master, south, 2))
+            east = Point2D(_SDA_ESCAPE_X, _SDA_SOUTH_DETOUR_Y)
+            elements.append(WireSegment(south, east, 2))
+            rise = Point2D(_SDA_ESCAPE_X, highway_y)
+            elements.append(WireSegment(east, rise, 2))
+            oled_corner = Point2D(oled_xy.x, highway_y)
+            elements.append(WireSegment(rise, oled_corner, 2))
+            elements.append(WireSegment(oled_corner, oled_xy, 2))
+        else:  # SCL
+            rise = Point2D(master.x, highway_y)
+            elements.append(WireSegment(master, rise, 2))
+            oled_corner = Point2D(oled_xy.x, highway_y)
+            elements.append(WireSegment(rise, oled_corner, 2))
+            elements.append(WireSegment(oled_corner, oled_xy, 2))
+
+        paths.append(SignalPath(name=name.lower(), elements=tuple(elements)))
+
+    return paths
+
+
+def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
+    """No bridge vias in the OLED-terminal bus topology."""
+    return []
+
+
+def _oled_only_return_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
+    """Position of the L2→L1 return through-hole south of each OLED pin."""
+    from netlist import I2cSignal
+    out: list[tuple[Point2D, str]] = []
+    for name, sig in (
+        ("vcc", I2cSignal.VCC),
+        ("gnd", I2cSignal.GND),
+        ("scl", I2cSignal.SCL),
+        ("sda", I2cSignal.SDA),
+    ):
+        net = nets.get(sig)
+        if net is None:
+            continue
+        oled_pin = next((p for p in net.device_pins if p.ref == "J4"), None)
+        if oled_pin is None:
+            continue
+        target = _pin_position(oled_pin)
+        ret = Point2D(target.x, target.y + _OLED_ONLY_RETURN_OFFSET)
+        out.append((ret, f"{name}_oled_return"))
+    return out
 
 
 # ---------------------------------------------------------------------------
@@ -278,6 +838,18 @@ class Tier1Substrate(ad.CompositeShape):
         from netlist import TIER1_NETS
         return TIER1_NETS
 
+    def _get_signal_paths(self) -> List[SignalPath]:
+        """Per-signal corridor topology (one corridor per net).
+
+        Subclasses can replace this hook to swap in a different topology
+        without re-implementing all of `build()`. `Tier2SubstrateBundled`
+        overrides this to emit the bundled-bus topology.
+        """
+        paths: List[SignalPath] = []
+        for net in self._routed_nets().values():
+            paths.extend(_build_paths_for_net(net))
+        return paths
+
     def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
         """Hook for subclasses to add raised features (pedestals,
         support bumps) above the substrate top. Tier 1 adds nothing."""
@@ -287,6 +859,39 @@ class Tier1Substrate(ad.CompositeShape):
         """Hook for subclasses to add extra holes (receptacles, etc.).
         Tier 1 has no extras."""
         pass
+
+    def _standard_hole_positions(self) -> list[tuple["Point2D", str]]:
+        """Pin through-holes drilled at the default hole_diameter:
+        routed ESP32 master pins plus every sensor (J2, J3) pin.
+
+        Build() uses this to drive the punch loop, and the routing
+        tests use it (together with `_drilled_hole_positions`) to
+        check that no routed channel intrudes on a foreign pin hole."""
+        routed_esp_pins: set[tuple[str, int]] = set()
+        for net in self._routed_nets().values():
+            mp = net.master_pin
+            if mp.ref in ("J1A", "J1B"):
+                routed_esp_pins.add((mp.ref, mp.number))
+
+        holes: list[tuple[Point2D, str]] = []
+        for ref, x_anchor in (("J1A", _J1A_X), ("J1B", _J1B_X)):
+            for i in range(9):
+                if (ref, i + 1) not in routed_esp_pins:
+                    continue
+                holes.append(
+                    (_esp32_pin(x_anchor, _J1A_Y, i + 1), f"{ref}.{i + 1}")
+                )
+        for i in range(4):
+            holes.append((_sensor_pin(_J2_X, _J2_Y, i + 1), f"J2.{i + 1}"))
+        for i in range(5):
+            holes.append((_sensor_pin(_J3_X, _J3_Y, i + 1), f"J3.{i + 1}"))
+        return holes
+
+    def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
+        """Every drilled through-hole on this substrate, including
+        subclass extras (OLED receptacles, return holes, vias).
+        Subclasses override to extend the standard list."""
+        return list(self._standard_hole_positions())
 
     def build(self) -> ad.Maker:
         d = self.dim
@@ -313,37 +918,14 @@ class Tier1Substrate(ad.CompositeShape):
                 post=ad.translate([pt.x, pt.y, 0]),
             )
 
-        # ESP32 columns: only punch holes for pins that carry a routed
-        # bus signal. The SuperMini has 9 + 9 pins but only 4 are
-        # wired on this design (J1A.2 GND, J1A.3 +3V3, J1B.1 SDA,
-        # J1B.2 SCL). Skipping the other 14 saves ~20 % of slicer
-        # output complexity and meaningful print time, with no
-        # functional cost: the ESP32 mounts either bare-pin (only the
-        # 4 needed pins soldered) or with the unused pre-soldered
-        # pins trimmed flush before insertion. The 4 routed holes
-        # plus the inlay pocket walls keep the module aligned.
-        routed_esp_pins: set[tuple[str, int]] = set()
-        for net in self._routed_nets().values():
-            mp = net.master_pin
-            if mp.ref in ("J1A", "J1B"):
-                routed_esp_pins.add((mp.ref, mp.number))
-
-        for ref, x_anchor in (("J1A", _J1A_X), ("J1B", _J1B_X)):
-            for i in range(9):
-                if (ref, i + 1) not in routed_esp_pins:
-                    continue
-                punch_hole(
-                    _esp32_pin(x_anchor, _J1A_Y, i + 1),
-                    f"{ref.lower()}_{i + 1}",
-                )
-
-        # Sensor headers stay fully populated — they come from the
-        # vendor with all pins pre-soldered and need every hole to
-        # seat into the pocket.
-        for i in range(4):
-            punch_hole(_sensor_pin(_J2_X, _J2_Y, i + 1), f"j2_{i + 1}")
-        for i in range(5):
-            punch_hole(_sensor_pin(_J3_X, _J3_Y, i + 1), f"j3_{i + 1}")
+        # ESP32 columns: only the routed master pins are drilled
+        # (SuperMini has 18 pins but only 4 are wired). Sensor headers
+        # are fully populated — they come from the vendor with all pins
+        # pre-soldered and need every hole to seat into the pocket.
+        # The exact enumeration lives in `_standard_hole_positions` so
+        # routing tests can audit it without re-running the build.
+        for pt, name in self._standard_hole_positions():
+            punch_hole(pt, name.lower().replace(".", "_"))
 
         # Subclass extension point (e.g. OLED receptacles).
         self._punch_extra_holes(shape, d)
@@ -386,19 +968,19 @@ class Tier1Substrate(ad.CompositeShape):
             cd = d.channel_depth
             cm = d.overcut
             z = l1_z if seg.layer == 1 else l2_z
-            if seg.is_horizontal:
-                length = abs(seg.end.x - seg.start.x)
-                cx = (seg.start.x + seg.end.x) / 2
-                cy = seg.start.y
-                box = ad.Box([length + cm, cw, cd + cm])
-            else:
-                length = abs(seg.end.y - seg.start.y)
-                cx = seg.start.x
-                cy = (seg.start.y + seg.end.y) / 2
-                box = ad.Box([cw, length + cm, cd + cm])
+            dx = seg.end.x - seg.start.x
+            dy = seg.end.y - seg.start.y
+            length = math.hypot(dx, dy)
+            cx = (seg.start.x + seg.end.x) / 2
+            cy = (seg.start.y + seg.end.y) / 2
+            # Box default extent is along +X. Rotate around Z to align
+            # with the segment direction so diagonals cut at 45° instead
+            # of collapsing into axis-aligned drops.
+            angle_deg = math.degrees(math.atan2(dy, dx))
+            box = ad.Box([length + cm, cw, cd + cm])
             shape.add_at(
                 box.hole(name).at("centre"),
-                post=ad.translate([cx, cy, z]),
+                post=ad.translate([cx, cy, z]) * ad.rotZ(angle_deg),
             )
 
         def cut_via(via: Via, name: str) -> None:
@@ -410,15 +992,14 @@ class Tier1Substrate(ad.CompositeShape):
 
         seg_idx = 0
         via_idx = 0
-        for net in self._routed_nets().values():
-            for path in _build_paths_for_net(net):
-                for elem in path.elements:
-                    if isinstance(elem, WireSegment):
-                        cut_segment(elem, f"{path.name}_seg_{seg_idx}")
-                        seg_idx += 1
-                    else:
-                        cut_via(elem, f"{path.name}_via_{via_idx}")
-                        via_idx += 1
+        for path in self._get_signal_paths():
+            for elem in path.elements:
+                if isinstance(elem, WireSegment):
+                    cut_segment(elem, f"{path.name}_seg_{seg_idx}")
+                    seg_idx += 1
+                else:
+                    cut_via(elem, f"{path.name}_via_{via_idx}")
+                    via_idx += 1
 
         return shape
 
@@ -494,6 +1075,15 @@ class Tier2Substrate(Tier1Substrate):
             ]),
         )
 
+    def _oled_receptacle_positions(self) -> list[tuple["Point2D", str]]:
+        return [
+            (_sensor_pin(_J4_X, _J4_Y, i + 1), f"J4.{i + 1}")
+            for i in range(4)
+        ]
+
+    def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
+        return super()._drilled_hole_positions() + self._oled_receptacle_positions()
+
     def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
         # Receptacle goes through both the substrate body (thickness)
         # AND the raised pedestal (oled_pedestal_height) so the OLED
@@ -505,9 +1095,133 @@ class Tier2Substrate(Tier1Substrate):
         #   centre = (substrate_bottom + pedestal_top) / 2
         #          = pedestal_height / 2
         receptacle_z = d.oled_pedestal_height / 2
-        for i in range(4):
-            pt = _sensor_pin(_J4_X, _J4_Y, i + 1)
+        for pt, name in self._oled_receptacle_positions():
             shape.add_at(
-                receptacle.hole(f"j4_{i + 1}").at("centre"),
+                receptacle.hole(name.lower().replace(".", "_")).at("centre"),
                 post=ad.translate([pt.x, pt.y, receptacle_z]),
+            )
+
+
+@ad.shape
+@datatree
+class Tier2SubstrateBundled(Tier2Substrate):
+    """Tier 2 substrate with split bus-trunk topology — power signals
+    snake through the south band on a threadable wire path, bus
+    signals keep the existing north-corridor model.
+
+    Per-signal routing:
+
+      VCC, GND (south band)
+        master → 45° SE to south strip → east → 45° NE up to non-terminal
+        pin (solder) → 45° SE on L2 to paired return hole → continue east
+        → ... → 45° SW down to OLED terminal pin.
+        Each non-terminal pin gets a 2nd "return" through-hole drilled
+        south of the pin row.
+
+      SCL, SDA (north band)
+        Existing per-signal corridor model: master east-stub → north
+        escape → L2 east corridor → south to each device pin. Branches,
+        not a continuous snake — bus signals don't get the threading
+        treatment because the optimizer's per-signal-vs-bundled
+        comparison naturally pairs them with the corridor model.
+
+    This split prevents the diagonal crossings that occur when all
+    four signals share the south band; only VCC↔GND can still cross
+    within the south band (acceptable for insulated wire, future work
+    for vias). Returns sit between the sensor pin row and substrate
+    south edge per the user's preferred install layout.
+    """
+
+    # South band visits OLED first so the wire sweeps strictly east —
+    # avoids a ~27 mm L1 backsweep that the OLED-as-terminal order
+    # produced. Top layer keeps OLED as terminal so its L2 descent
+    # through the pedestal shadow stays a single straight drop instead
+    # of a sensor-style L1 pickup (which would cross VCC/GND L1 strips).
+    _SOUTH_BAND_VISIT_ORDER = ("ESP32", "OLED", "SCD41", "BH1750")
+    _TOP_LAYER_VISIT_ORDER = ("ESP32", "SCD41", "BH1750", "OLED")
+    _SOUTH_BAND_STRIP_YS = {  # filled in lazily — depends on I2cSignal import
+        # I2cSignal.VCC: -19.0, I2cSignal.GND: -21.0
+    }
+    _TOP_LAYER_CORRIDOR_YS = {
+        # I2cSignal.SCL: 5.0, I2cSignal.SDA: 6.5
+    }
+    _TOP_LAYER_VIA_ESCAPE_XS = {
+        # I2cSignal.SCL: -6.0, I2cSignal.SDA: -8.0 — staggered so the
+        # two L2 north escapes don't share an x column.
+    }
+    _TOP_LAYER_CHAMFER_LENGTH = 1.0
+
+    def _south_band_strip_ys(self) -> dict:
+        from netlist import I2cSignal
+        if not self._SOUTH_BAND_STRIP_YS:
+            self._SOUTH_BAND_STRIP_YS.update({
+                I2cSignal.VCC: -19.0,
+                I2cSignal.GND: -21.0,
+            })
+        return self._SOUTH_BAND_STRIP_YS
+
+    def _top_layer_corridor_ys(self) -> dict:
+        from netlist import I2cSignal
+        if not self._TOP_LAYER_CORRIDOR_YS:
+            self._TOP_LAYER_CORRIDOR_YS.update({
+                I2cSignal.SCL: 5.0,
+                I2cSignal.SDA: 6.5,
+            })
+        return self._TOP_LAYER_CORRIDOR_YS
+
+    def _top_layer_via_escape_xs(self) -> dict:
+        from netlist import I2cSignal
+        if not self._TOP_LAYER_VIA_ESCAPE_XS:
+            self._TOP_LAYER_VIA_ESCAPE_XS.update({
+                I2cSignal.SCL: -6.0,
+                I2cSignal.SDA: -8.0,
+            })
+        return self._TOP_LAYER_VIA_ESCAPE_XS
+
+    def _get_signal_paths(self) -> List[SignalPath]:
+        from netlist import TIER2_NETS
+        return (
+            _build_oled_only_power_paths(TIER2_NETS)
+            + _build_bus_signal_paths(TIER2_NETS)
+        )
+
+    def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
+        from netlist import TIER2_NETS
+        return (
+            super()._drilled_hole_positions()
+            + list(_oled_only_return_hole_positions(TIER2_NETS))
+            + list(_bus_bridge_via_positions(TIER2_NETS))
+        )
+
+    def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
+        # Pedestal only — the cantilever support bump is omitted because
+        # the OLED is now centered on the substrate and no longer hangs
+        # off a single edge.
+        pedestal = ad.Box([
+            d.oled_pedestal_width,
+            d.oled_pedestal_depth,
+            d.oled_pedestal_height,
+        ])
+        pedestal_z = d.thickness / 2 + d.oled_pedestal_height / 2
+        shape.add_at(
+            pedestal.solid("oled_pedestal")
+            .colour([0.92, 0.88, 0.78])
+            .at("centre"),
+            post=ad.translate([0.0, _J4_Y, pedestal_z]),
+        )
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        super()._punch_extra_holes(shape, d)
+        from netlist import TIER2_NETS
+        hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
+        for pt, name in _oled_only_return_hole_positions(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        via = ad.Cylinder(r=d.via_diameter / 2, h=d.thickness + 0.4)
+        for pt, name in _bus_bridge_via_positions(TIER2_NETS):
+            shape.add_at(
+                via.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
             )
