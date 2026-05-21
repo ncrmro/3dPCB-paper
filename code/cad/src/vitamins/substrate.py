@@ -540,8 +540,10 @@ _OLED_ONLY_RETURN_OFFSET = -4.0
 # y-corridor for the L1 continuation east-leg between the OLED-return
 # x column and the SCD41/BH1750 pin x columns. Each signal gets a
 # unique y to keep east legs on the same layer from sharing a row.
-#   GND  -19.0  — south of every pocket south edge; 1.1 mm CAD wall to
-#                pin hole north edges at -17.5 ✓
+#   GND  -21.0  — south of every pocket south edge. Was -19.0; moved
+#                further south to open a clear L1 east-west band
+#                between pin row (-17) and GND for bus L1 returns
+#                (SCL J2.3/J3.3 extensions at y=-19.3).
 #   VCC  -15.3  — north of pin row; 0.7 mm CAD wall to pin hole north
 #                edges at -16.5 ✓. Was -16.0 (0.1 mm wall) — moved
 #                north to clear the 0.6 mm FDM printable-wall floor
@@ -550,7 +552,7 @@ _OLED_ONLY_RETURN_OFFSET = -4.0
 # north-shoulder L2 highway, not via this SCD41 corridor.
 _SCD41_CORRIDOR_YS = {
     "VCC": -15.3,
-    "GND": -19.0,
+    "GND": -21.0,
 }
 
 # Bus-signal routing uses a north-shoulder highway on L2: each signal
@@ -574,15 +576,30 @@ _SCD41_CORRIDOR_YS = {
 #   between ESP32 east edge at -12.11 and SCD41 west edge at +2.16),
 #   L2 north up to highway. The +1.5 column is chosen so the x=+17
 #   gap between SCD41 and BH1750 stays free for the SCL J2.3 bridge.
-_BUS_HIGHWAY_YS = {"SCL": 17.0, "SDA": 19.0}
+_BUS_HIGHWAY_YS = {"SCL": 17.0, "SDA": 20.0}
 _SDA_SOUTH_DETOUR_Y = -21.0
 # SDA's L2 vertical climbs from the south band at y=-21 to its
-# highway at y=+19. The column sits in the SCD41/BH1750 gap
-# (+15.46 to +18.08) at x=+17 — clear of SCL's highway extent
-# (which ends at OLED column +1.27 since no sensor extensions are
-# routed). SDA highway at +19 vs SCL at +17 gives 1.2 mm channel
-# gap on the north shoulder.
-_SDA_NORTH_ESCAPE_X = 17.0  # SCD41/BH1750 gap [+15.46, +18.08]
+# highway at y=+19. The column sits east of the BH1750 pocket
+# (BH1750 east edge +32.08) at x=+34 — clear of SCL's bridge
+# column at x=+17 (in the SCD41/BH1750 gap +15.46..+18.08), which
+# is needed for SCL's J2.3/J3.3 sensor extensions. SDA detours
+# all the way east at the south band before climbing.
+_SDA_NORTH_ESCAPE_X = 34.0  # east of BH1750 pocket (+32.08)
+
+# SCL sensor extensions reach J2.3 (+10.08, -17) and J3.3 (+25.08,
+# -17) by dropping L2 south from the highway at the bridge column,
+# transitioning to L1 just south of the pin row, and running
+# L1 east-west to each pin's column with a short north stub up
+# to the pin. The L1 east-west y must:
+#   - clear pin holes at y=-17 (channel north < -17.5 - 0.6 = -18.1)
+#   - clear GND L1 east leg at y=-19 (channel south > -19.4 + 0.6 = -18.8)
+# Gap (-18.8, -18.1) — pick -18.5 (centred, 0.3 mm margin each side).
+_SCL_BRIDGE_X = 17.0  # SCD41/BH1750 clear gap
+# SCL bridge bottom y = -19.3 — south of pin row (channel south clears
+# foreign pin holes by 0.6 mm) AND north of GND corridor at -21
+# (channel south clears GND inflated north by 0.6 mm). The L1 east-
+# west and the L2→L1 transition via both live at this y.
+_SCL_BRIDGE_BOTTOM_Y = -19.3
 
 
 def _build_oled_only_power_paths(nets: dict) -> List[SignalPath]:
@@ -689,34 +706,40 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
       SCL: L1 east escape from J1B.2 (-12.22, -14.46) → (-10, -14.46),
            via to L2, L2 north to highway y=+17, L2 east along the
            highway, south drop into OLED J4.3 at (+1.27, +10).
+           Highway continues east to the bridge column x=+17 in the
+           SCD41/BH1750 gap. L2 south from (+17, +17) to
+           (+17, -18.5), via to L1 there. From the bridge bottom:
+           L1 west to (+10.08, -18.5) then north 1.5 mm into J2.3,
+           AND L1 east to (+25.08, -18.5) then north 1.5 mm into
+           J3.3. Both L1 east-west legs span x ranges that exclude
+           GND's north stubs (at x=+7.54 and x=+27.62 — outside
+           the [+10.08, +17] and [+17, +25.08] spans).
       SDA: L1 south escape from J1B.1 (-12.22, -17) → (-12.22, -21)
-           past all pocket south edges, via to L2, L2 east to x=+17
-           (in the gap between SCD41 east at +15.46 and BH1750 west
-           at +18.08), L2 north to highway y=+19, L2 west to OLED
-           J4.4 at (+3.81, +10). SDA highway is staggered 2 mm
-           north of SCL's to keep the two parallel east-runs from
-           sharing channel y.
+           past all pocket south edges, via to L2, L2 east to x=+34
+           (east of BH1750 pocket +32.08), L2 north to highway
+           y=+19, L2 west to OLED J4.4 at (+3.81, +10). SDA detours
+           all the way east at the south band to leave the
+           SCD41/BH1750 gap free for SCL's bridge column.
 
-    Deferred sensor extensions (SCD41 + BH1750):
-      The route from highway to any sensor pin must cross VCC's L1
-      east corridor at y=-16 (sensor pins sit at y=-17, between VCC
-      at -16 and GND at -19). A bridge requires placing the
-      transition via in clear substrate, which only exists in the
-      narrow SCD41/BH1750 gap (+15.46..+18.08) and east of BH1750
-      (>+32.08). After the bridge, the L1 east-west return at
-      y≈-18 must traverse multiple sensor x columns — but GND's
-      north stubs (corridor y=-19 → pin y=-17) occupy y∈[-19,-17]
-      at each GND sensor pin column (J2.2 at +7.54, J3.4 at
-      +27.62), blocking any L1 east-west run between GND corridor
-      and pin row.
-
-      Resolving this requires either: (a) restructuring the VCC/GND
-      power topology so both corridors sit on the same side of the
-      pin row, freeing the opposite-side y-band for bus returns; or
-      (b) routing each bus stub through an OLED-style return-hole
-      pattern that bypasses the corridor crossings via a dedicated
-      drilled hole north of pin row. Both are larger structural
-      changes than the highway relocation."""
+    Deferred sensor extensions:
+      SDA → J2.4 (+12.62, -17) and SDA → J3.2 (+22.54, -17) remain
+      unwired. Both are inside the SCD41/BH1750 pocket-spanned x
+      range. Any L1 east-west bus return that reaches them crosses
+      GND's north stubs (at x=+7.54 for J2.2, at +27.62 for J3.4),
+      since the GND-stub channels span y∈[GND_corridor, pin_row].
+      The SCD41/BH1750 gap (where SCL's bridge sits) cannot fit a
+      second L2 vertical for SDA — only one via column fits in the
+      2.62 mm gap with printable-wall clearances. Fixing requires
+      either: (a) restructuring VCC/GND to use 45° stubs (so the
+      stub at a given x doesn't span the full y range from corridor
+      to pin); (b) per-pin SDA return holes drilled adjacent to
+      each sensor's SDA pin, with a manual solder jumper on top of
+      the substrate; (c) the conductivity refinement (allow L2
+      under silkscreened PCB-back regions). All three are bigger
+      changes than the SCL extension that fits the current
+      topology cleanly. Tier2SubstrateBundled lists these pins in
+      `_known_unconnected_pins` so the connectivity test surfaces
+      the gap honestly without false-green."""
     from netlist import I2cSignal
     paths: List[SignalPath] = []
     sig_map = {"SCL": I2cSignal.SCL, "SDA": I2cSignal.SDA}
@@ -744,7 +767,14 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
             elements.append(WireSegment(east, rise, 2))
             oled_corner = Point2D(oled_xy.x, highway_y)
             elements.append(WireSegment(rise, oled_corner, 2))
-            elements.append(WireSegment(oled_corner, oled_xy, 2))
+            # Enter J4.4 from BELOW via L1, not L2. An L2 south stub
+            # from (+3.81, +20) to (+3.81, +10) would cross SCL's L2
+            # east leg at (+3.81, +17). Instead, transition to L1 at
+            # the OLED-column highway corner and run L1 south. The
+            # via at (oled_xy.x, highway_y) is drilled at hole_diameter
+            # (smaller than via_diameter) so its inflated y stays
+            # clear of SCL's highway by the 0.6 mm wall floor.
+            elements.append(WireSegment(oled_corner, oled_xy, 1))
         else:  # SCL
             # L1 east past the ESP32 pocket east edge, then via to L2.
             l1_end = Point2D(_BUS_L1_ESCAPE_X, master.y)
@@ -755,16 +785,40 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
             elements.append(WireSegment(rise, oled_corner, 2))
             elements.append(WireSegment(oled_corner, oled_xy, 2))
 
+            # SCD41 (J2.3) and BH1750 (J3.3) sensor extensions —
+            # highway continues east from the OLED column to the
+            # bridge column at x=+17, L2 south to L1, then L1
+            # east-west to each pin column with a short north stub
+            # up to the pin.
+            scd41_scl = next((p for p in net.device_pins if p.ref == "J2"), None)
+            bh1750_scl = next((p for p in net.device_pins if p.ref == "J3"), None)
+            if scd41_scl is not None or bh1750_scl is not None:
+                bridge_top = Point2D(_SCL_BRIDGE_X, highway_y)
+                elements.append(WireSegment(oled_corner, bridge_top, 2))
+                bridge_bot = Point2D(_SCL_BRIDGE_X, _SCL_BRIDGE_BOTTOM_Y)
+                elements.append(WireSegment(bridge_top, bridge_bot, 2))
+                if scd41_scl is not None:
+                    scd_xy = _pin_position(scd41_scl)
+                    west_at_bridge_y = Point2D(scd_xy.x, _SCL_BRIDGE_BOTTOM_Y)
+                    elements.append(WireSegment(bridge_bot, west_at_bridge_y, 1))
+                    elements.append(WireSegment(west_at_bridge_y, scd_xy, 1))
+                if bh1750_scl is not None:
+                    bh_xy = _pin_position(bh1750_scl)
+                    east_at_bridge_y = Point2D(bh_xy.x, _SCL_BRIDGE_BOTTOM_Y)
+                    elements.append(WireSegment(bridge_bot, east_at_bridge_y, 1))
+                    elements.append(WireSegment(east_at_bridge_y, bh_xy, 1))
+
         paths.append(SignalPath(name=name.lower(), elements=tuple(elements)))
 
     return paths
 
 
 def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
-    """L1→L2 escape vias for each bus signal (drilled at via_diameter
-    = 1.5 mm). These sit just outside the ESP32 pocket where the
-    extra width is harmless. SCD41-extension transitions use a
-    smaller drill — see `_bus_scd41_bridge_hole_positions`."""
+    """L1↔L2 transition vias drilled at via_diameter = 1.5 mm. The
+    SCL escape and SDA escape vias sit just outside the ESP32 pocket
+    where the extra width is harmless. The narrower L1↔L2 holes
+    (SCL bridge bottom, SDA OLED entry) use hole_diameter and are
+    in `_bus_bridge_hole_positions` instead."""
     from netlist import I2cSignal
     out: list[tuple[Point2D, str]] = []
     net_scl = nets.get(I2cSignal.SCL)
@@ -775,6 +829,35 @@ def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
     if net_sda is not None:
         master_sda = _pin_position(net_sda.master_pin)
         out.append((Point2D(master_sda.x, _SDA_SOUTH_DETOUR_Y), "sda_escape_via"))
+    return out
+
+
+def _bus_bridge_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
+    """L1↔L2 transition holes drilled at hole_diameter = 1.0 mm.
+    Used where via_diameter (1.5 mm) inflates close enough to a
+    foreign feature (SCL highway, pin row, GND corridor) that the
+    larger drill would violate the printable-wall floor.
+
+    Names DON'T end in `_via` so the test's diameter-dispatch logic
+    falls through to `hole_diameter`."""
+    from netlist import I2cSignal
+    out: list[tuple[Point2D, str]] = []
+    net_scl = nets.get(I2cSignal.SCL)
+    if net_scl is not None and any(p.ref in ("J2", "J3") for p in net_scl.device_pins):
+        out.append((
+            Point2D(_SCL_BRIDGE_X, _SCL_BRIDGE_BOTTOM_Y),
+            "scl_bridge",
+        ))
+    net_sda = nets.get(I2cSignal.SDA)
+    if net_sda is not None:
+        sda_oled = next((p for p in net_sda.device_pins if p.ref == "J4"), None)
+        if sda_oled is not None:
+            oled_xy = _pin_position(sda_oled)
+            highway_y = _BUS_HIGHWAY_YS["SDA"]
+            out.append((
+                Point2D(oled_xy.x, highway_y),
+                "sda_oled_entry",
+            ))
     return out
 
 
@@ -896,6 +979,14 @@ class Tier1Substrate(ad.CompositeShape):
         """Which NETS this substrate routes. Tier 1 = SCD41 + BH1750."""
         from netlist import TIER1_NETS
         return TIER1_NETS
+
+    def _known_unconnected_pins(self) -> tuple[tuple[str, str, int], ...]:
+        """Tuple of (signal_name, pin_ref, pin_number) entries that
+        this substrate intentionally leaves unwired despite being
+        listed in `_routed_nets()`. Used by the connectivity test
+        to surface deferred work without false-green CI. Override
+        on subclasses that have known topological constraints."""
+        return ()
 
     def _get_signal_paths(self) -> List[SignalPath]:
         """Per-signal corridor topology (one corridor per net).
@@ -1291,6 +1382,17 @@ class Tier2SubstrateBundled(Tier2Substrate):
             super()._drilled_hole_positions()
             + list(_oled_only_return_hole_positions(TIER2_NETS))
             + list(_bus_bridge_via_positions(TIER2_NETS))
+            + list(_bus_bridge_hole_positions(TIER2_NETS))
+        )
+
+    def _known_unconnected_pins(self) -> tuple[tuple[str, str, int], ...]:
+        # SDA → J2.4 (SCD41 SDA pin) and SDA → J3.2 (BH1750 SDA pin)
+        # cannot be wired with the current power-corridor topology —
+        # see the deferred-extensions block in
+        # `_build_bus_signal_paths` for the topological constraint.
+        return (
+            ("SDA", "J2", 4),
+            ("SDA", "J3", 2),
         )
 
     def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
@@ -1323,5 +1425,10 @@ class Tier2SubstrateBundled(Tier2Substrate):
         for pt, name in _bus_bridge_via_positions(TIER2_NETS):
             shape.add_at(
                 via.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        for pt, name in _bus_bridge_hole_positions(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
                 post=ad.translate([pt.x, pt.y, 0]),
             )
