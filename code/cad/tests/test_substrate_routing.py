@@ -22,6 +22,8 @@ its routed nets via `_routed_nets()`.
 
 from __future__ import annotations
 
+import math
+
 import pytest
 
 from vitamins.substrate import (
@@ -167,3 +169,40 @@ def test_no_voxel_overlap_between_signals(substrate):
                     )
 
     assert not collisions, "\n".join(collisions)
+
+
+# Angle-alignment invariant: every routed segment must run at a
+# multiple of 45° (i.e. axis-aligned or exact-45° diagonal). The
+# chamfer suggester in voxel_suggester.apply_chamfers preserves
+# this by construction — if any future change introduces a segment
+# at e.g. 30° or atan2(b, a) for unequal legs, the printed channel
+# would no longer match the orthogonal-and-45° design intent.
+
+_ALLOWED_ANGLE_DEGREES = (0.0, 45.0, 90.0, 135.0, 180.0, -45.0, -90.0, -135.0, -180.0)
+_ANGLE_TOLERANCE_DEG = 0.05
+
+
+def test_every_segment_is_45_or_90(substrate):
+    """All routed wire segments must align to a 45° multiple."""
+    bad: list[str] = []
+    for path in substrate._get_signal_paths():
+        for elem in path.elements:
+            if not isinstance(elem, WireSegment):
+                continue
+            dx = elem.end.x - elem.start.x
+            dy = elem.end.y - elem.start.y
+            if math.hypot(dx, dy) < 1e-6:
+                continue
+            angle = math.degrees(math.atan2(dy, dx))
+            if not any(abs(angle - a) < _ANGLE_TOLERANCE_DEG
+                       for a in _ALLOWED_ANGLE_DEGREES):
+                bad.append(
+                    f"path {path.name!r} L{elem.layer}: "
+                    f"({elem.start.x:.3f}, {elem.start.y:.3f}) → "
+                    f"({elem.end.x:.3f}, {elem.end.y:.3f}) "
+                    f"runs at {angle:.3f}° (not a multiple of 45°)"
+                )
+    assert not bad, (
+        "Every WireSegment must run at 0°/±45°/±90°/±135°/±180° — "
+        "no arbitrary slopes:\n" + "\n".join(bad)
+    )

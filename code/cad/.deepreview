@@ -30,10 +30,22 @@ substrate_voxel_check:
            - sub-printable wall thickness (channels and pin rows < 0.6 mm
              apart in CAD print as one merged void)
 
+      The same test file also enforces an angle-alignment invariant:
+      every routed WireSegment must run at a multiple of 45°
+      (0°/±45°/±90°/±135°). Arbitrary slopes (e.g. atan2(b, a) for
+      unequal-leg L-bends) are forbidden because they don't match the
+      printable-design intent. The chamfer post-process in
+      `voxel_suggester.apply_chamfers` preserves the invariant by
+      construction — verify the new test
+      `test_every_segment_is_45_or_90` passes.
+
       ## Output Format
 
-      - PASS: voxel test green, list the substrate classes covered by
-        the parameterized fixture (Tier1Substrate, Tier2Substrate,
+      - PASS: voxel test green AND angle test green; list the
+        substrate classes covered (Tier1Substrate, Tier2Substrate,
         Tier2SubstrateBundled).
-      - FAIL: paste the assertion lines verbatim and identify which of
-        the seven known failure modes each collision falls under.
+      - FAIL (collision): paste the assertion lines verbatim and
+        identify which of the seven known failure modes each
+        collision falls under.
+      - FAIL (angle): name the segment (path, layer, endpoints, angle)
+        that violates the 45°-multiple invariant.
