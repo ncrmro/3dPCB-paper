@@ -32,6 +32,7 @@ from vitamins.substrate import (
     Tier2Substrate,
     Tier2SubstrateBundled,
     WireSegment,
+    _pin_position,
 )
 from voxel_grid import (
     voxels_in_pcb_footprint_l2 as _voxels_in_pcb_footprint_l2,
@@ -205,4 +206,77 @@ def test_every_segment_is_45_or_90(substrate):
     assert not bad, (
         "Every WireSegment must run at 0°/±45°/±90°/±135°/±180° — "
         "no arbitrary slopes:\n" + "\n".join(bad)
+    )
+
+
+# Connectivity invariant: every pin claimed by a routed net (master
+# pin + every device pin) must be reached by that signal's routed
+# path. A pin xy must appear as an endpoint of at least one
+# WireSegment in the path matching the signal name. If a net's path
+# doesn't reach all its pins, the substrate has a dead-end / missing
+# wire — the bus isn't physically complete.
+
+_PIN_MATCH_TOLERANCE_MM = 0.05
+
+
+def _path_endpoints(path) -> set[tuple[float, float]]:
+    """All wire-segment endpoint xys for a path, rounded to a stable
+    key for set membership."""
+    out: set[tuple[float, float]] = set()
+    for elem in path.elements:
+        if not isinstance(elem, WireSegment):
+            continue
+        out.add((round(elem.start.x, 3), round(elem.start.y, 3)))
+        out.add((round(elem.end.x, 3), round(elem.end.y, 3)))
+    return out
+
+
+def _pin_is_in_endpoints(pin_xy: Point2D, endpoints: set[tuple[float, float]]) -> bool:
+    """True iff some endpoint is within `_PIN_MATCH_TOLERANCE_MM` of
+    the pin's xy. Tolerance covers rounding drift from chamfer math."""
+    for ex, ey in endpoints:
+        if (
+            abs(ex - pin_xy.x) < _PIN_MATCH_TOLERANCE_MM
+            and abs(ey - pin_xy.y) < _PIN_MATCH_TOLERANCE_MM
+        ):
+            return True
+    return False
+
+
+def test_every_routed_pin_is_connected(substrate):
+    """For each routed net, the master pin AND every device pin must
+    be reached by an endpoint of the signal's path."""
+    paths_by_sig: dict[str, object] = {}
+    for path in substrate._get_signal_paths():
+        sig = path.name.split("_", 1)[0]
+        paths_by_sig.setdefault(sig, []).append(path)
+
+    unconnected: list[str] = []
+
+    for sig_enum, net in substrate._routed_nets().items():
+        sig = sig_enum.name.lower()
+        sig_paths = paths_by_sig.get(sig, [])
+        if not sig_paths:
+            unconnected.append(
+                f"signal {sig.upper()}: no routed path emitted for this net"
+            )
+            continue
+        endpoints: set[tuple[float, float]] = set()
+        for p in sig_paths:
+            endpoints |= _path_endpoints(p)
+
+        all_pins = [net.master_pin, *net.device_pins]
+        for pin in all_pins:
+            pos = _pin_position(pin)
+            if not _pin_is_in_endpoints(pos, endpoints):
+                unconnected.append(
+                    f"signal {sig.upper()}: pin {pin.ref}.{pin.number} "
+                    f"at ({pos.x:.2f}, {pos.y:.2f}) is NOT reached by the "
+                    f"routed path — bus is incomplete"
+                )
+
+    assert not unconnected, (
+        "Every routed pin (master + device) must be the endpoint of at "
+        "least one WireSegment in its signal's path:\n"
+        + "\n".join(unconnected)
     )
