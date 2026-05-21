@@ -540,17 +540,17 @@ _OLED_ONLY_RETURN_OFFSET = -4.0
 # y-corridor for the L1 continuation east-leg between the OLED-return
 # x column and the SCD41/BH1750 pin x columns. Each signal gets a
 # unique y to keep east legs on the same layer from sharing a row.
-#   GND  -19  — south of every pocket south edge
-#   VCC  -16  — between J1B.1 row (-17) and J1B.2 row (-14.46)
-#   SCL  -15  — south of J1B.2 (-14.46), north of VCC's east leg
-#   SDA  -14  — north of J1B.2, south of J1B.3 (-11.92)
-# SCL/SDA stubs into their SCD41 pin cross VCC's east leg at y=-16;
-# those crossings are bridged with a short L2 segment + 2 vias.
+#   GND  -19.0  — south of every pocket south edge; 1.1 mm CAD wall to
+#                pin hole north edges at -17.5 ✓
+#   VCC  -15.3  — north of pin row; 0.7 mm CAD wall to pin hole north
+#                edges at -16.5 ✓. Was -16.0 (0.1 mm wall) — moved
+#                north to clear the 0.6 mm FDM printable-wall floor
+#                (failure mode #7 in the printable_pcb job).
+# SCL/SDA entries are vestigial — bus signals route via the
+# north-shoulder L2 highway, not via this SCD41 corridor.
 _SCD41_CORRIDOR_YS = {
-    "VCC": -16.0,
+    "VCC": -15.3,
     "GND": -19.0,
-    "SCL": -15.0,
-    "SDA": -14.0,
 }
 
 # Bus-signal routing uses a north-shoulder highway on L2: each signal

@@ -135,7 +135,11 @@ PRIMARY_BUS = TIER2_BUS
 ROUTING: dict[I2cSignal, RoutingHint] = {
     I2cSignal.VCC: RoutingHint(north_x=-29.0, corridor_y=6.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
-    I2cSignal.GND: RoutingHint(north_x=-27.0, corridor_y=9.0,
+    # GND corridor_y was 9.0; pulled south to 8.0 so the inflated L2
+    # channel clears the OLED receptacles at y=+10 (inflated south
+    # edge +9.075) by the 0.6 mm printable-wall floor. VCC at +6 is
+    # ~2 mm south — comfortable gap.
+    I2cSignal.GND: RoutingHint(north_x=-27.0, corridor_y=8.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
     I2cSignal.SCL: RoutingHint(north_x=-11.0, corridor_y=12.0,
                                scd_east_on_l2=True, branch_east_on_l2=True),
