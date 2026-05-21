@@ -1,11 +1,20 @@
 """Routing-suggestion pass — advisory companion to the voxel-overlap
 gate at `tests/test_substrate_routing.py`.
 
-For each axis-aligned L-bend in a routed path, rasterize the diagonal
-(45°) alternative that cuts the corner and check whether it still
-passes the wall-buffer test against ALL other features (foreign
-signals' channels, foreign pin holes, module boards). If the
-diagonal is clear, emit a suggestion with the wire-length savings.
+For each axis-aligned L-bend in a routed path, propose the maximum
+true 45° chamfer at the corner: cut equal length
+`c = min(|seg1|, |seg2|)` from each leg and replace with a 45°
+diagonal of length `c · √2`. The remaining longer leg stays
+orthogonal. If both legs are equal, the chamfer corner-to-corner
+absorbs both segments; if unequal, the shorter segment vanishes
+entirely and the longer segment is reduced by the chamfer cut.
+
+This keeps every wire at 90° or exact 45° — never an arbitrary
+slope. Rasterize the chamfered diagonal and check whether it
+satisfies the wall-buffer test against all other features
+(foreign signals' channels, foreign pin holes, module boards).
+If clear, emit a suggestion with the wire-length savings
+(`c · (2 - √2) ≈ c · 0.586`).
 
 This is a NON-failing advisory — the substrate doesn't need to
 follow the suggestions, and not all suggestions are net-positive
@@ -44,19 +53,63 @@ _SIGNAL_PREFIXES = ("vcc", "gnd", "scl", "sda")
 
 @dataclass
 class ChamferSuggestion:
-    """One advisory: replace two axis-aligned segments at `path_name`
-    with a single diagonal from `seg1.start` to `seg2.end`."""
+    """One advisory: cut equal length `c` from each leg of an L-bend
+    and replace with a 45° diagonal. `c = min(|seg1|, |seg2|)` —
+    the maximum cut that keeps the chamfer at 45°.
+
+    The replacement path is:
+      seg1.start → P  (shortened seg1, axis-aligned; omitted if c == |seg1|)
+      P → Q          (45° diagonal of length c·√2)
+      Q → seg2.end   (shortened seg2, axis-aligned; omitted if c == |seg2|)
+    """
     path_name: str
     layer: int
     elbow: Point2D
     seg1: WireSegment
     seg2: WireSegment
-    diagonal_length: float
+    chamfer_p: Point2D  # point on seg1 where 45° diagonal starts
+    chamfer_q: Point2D  # point on seg2 where 45° diagonal ends
+    cut_length: float   # c — equal cut on each leg
     original_length: float
 
     @property
+    def diagonal_length(self) -> float:
+        return self.cut_length * math.sqrt(2)
+
+    @property
     def saved_mm(self) -> float:
-        return self.original_length - self.diagonal_length
+        # Original = c + c on the cut portions; chamfered = c·√2.
+        return self.cut_length * (2.0 - math.sqrt(2))
+
+
+def _seg_length(s: WireSegment) -> float:
+    return math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
+
+
+def _max_45_chamfer(
+    s1: WireSegment, s2: WireSegment
+) -> tuple[Point2D, Point2D, float]:
+    """Geometry of the maximum 45° chamfer at the elbow s1.end == s2.start.
+
+    Returns (P, Q, c):
+      P is on s1, at distance c from the elbow back toward s1.start.
+      Q is on s2, at distance c from the elbow forward toward s2.end.
+      The chamfer diagonal P → Q is 45° (the cut is equal on both legs).
+      c = min(|s1|, |s2|) — the maximum cut that doesn't overshoot
+      either leg. Assumes s1 and s2 are axis-aligned and perpendicular
+      (caller checks via `_is_right_angle`)."""
+    a = _seg_length(s1)
+    b = _seg_length(s2)
+    c = min(a, b)
+    # Unit vector FROM s1.end BACK toward s1.start (so P = s1.end + c · u1_back).
+    u1_back_x = (s1.start.x - s1.end.x) / a
+    u1_back_y = (s1.start.y - s1.end.y) / a
+    # Unit vector FROM s2.start FORWARD toward s2.end.
+    u2_fwd_x = (s2.end.x - s2.start.x) / b
+    u2_fwd_y = (s2.end.y - s2.start.y) / b
+    P = Point2D(s1.end.x + c * u1_back_x, s1.end.y + c * u1_back_y)
+    Q = Point2D(s2.start.x + c * u2_fwd_x, s2.start.y + c * u2_fwd_y)
+    return P, Q, c
 
 
 def _is_right_angle(seg1: WireSegment, seg2: WireSegment) -> bool:
@@ -177,8 +230,8 @@ def _diagonal_collides(
 
 def find_chamfer_suggestions(sub, paths: Iterable[SignalPath] | None = None) -> list[ChamferSuggestion]:
     """Return all chamfer opportunities. A chamfer opportunity is an
-    L-bend in some routed path whose diagonal alternative passes the
-    wall-buffer voxel test against all other features.
+    L-bend in some routed path whose maximum 45° chamfer diagonal
+    passes the wall-buffer voxel test against all other features.
 
     `paths` defaults to `sub._get_signal_paths()` — pass an explicit
     list to inspect non-default path sets (e.g. when applying
@@ -210,9 +263,6 @@ def find_chamfer_suggestions(sub, paths: Iterable[SignalPath] | None = None) -> 
             s2 = wire_segs[i + 1]
             if not _is_right_angle(s1, s2):
                 continue
-            # Elbow must be a "free" corner — no other path segment
-            # ends or starts at the same xy on the same layer. (A
-            # junction with another segment must be preserved.)
             elbow = s1.end
             joined = 0
             for seg in wire_segs:
@@ -225,23 +275,26 @@ def find_chamfer_suggestions(sub, paths: Iterable[SignalPath] | None = None) -> 
             if joined > 0:
                 continue
 
-            diagonal = WireSegment(s1.start, s2.end, s1.layer)
+            P, Q, c = _max_45_chamfer(s1, s2)
+            if c < 0.2:
+                continue  # cut too small to be worthwhile
+            diagonal = WireSegment(P, Q, s1.layer)
             if _diagonal_collides(diagonal, psig, owner, buffer, path_voxels):
                 continue
 
-            seg_len = lambda s: math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
-            orig_len = seg_len(s1) + seg_len(s2)
-            diag_len = seg_len(diagonal)
-            if orig_len - diag_len < 0.1:
-                continue  # not a meaningful saving
+            saving = c * (2.0 - math.sqrt(2))
+            if saving < 0.1:
+                continue
             suggestions.append(ChamferSuggestion(
                 path_name=path.name,
                 layer=s1.layer,
                 elbow=elbow,
                 seg1=s1,
                 seg2=s2,
-                diagonal_length=diag_len,
-                original_length=orig_len,
+                chamfer_p=P,
+                chamfer_q=Q,
+                cut_length=c,
+                original_length=_seg_length(s1) + _seg_length(s2),
             ))
     return suggestions
 
@@ -255,23 +308,20 @@ def _chamfer_path_once(
     owner_without_self: dict[tuple[int, int, int], tuple[str, str, str | None]],
     buffer: float,
 ) -> tuple[SignalPath, float]:
-    """Try to apply one safe chamfer to `path`. Returns the (possibly
-    new) path and the saved-mm amount. If no safe chamfer is found,
-    returns the original path and 0.
+    """Try to apply one safe max-45° chamfer to `path`. Returns the
+    (possibly new) path and the saved-mm amount. If no safe chamfer
+    is found, returns the original path and 0.
 
     Strategy: scan consecutive segment pairs left-to-right, take the
-    FIRST safe non-junction L-bend whose diagonal passes the
-    buffer test. (Greedy — not optimal, but adequate for the
-    current paths.)"""
+    FIRST safe non-junction L-bend whose 45° chamfer diagonal passes
+    the buffer test. Greedy — not globally optimal, but the outer
+    loop in `apply_chamfers` iterates until convergence so adjacent
+    chamfer interactions resolve."""
     wire_segs: list[WireSegment] = []
-    others: list = []  # non-WireSegment elements (vias) and their indices
     for elem in path.elements:
         if isinstance(elem, WireSegment):
             wire_segs.append(elem)
-        else:
-            others.append(elem)
 
-    # Own voxels — exempt from the diagonal-collision check.
     own_voxels: set[tuple[int, int, int]] = set()
     for seg in wire_segs:
         for v in voxels_in_segment(seg, buffer=buffer):
@@ -296,26 +346,40 @@ def _chamfer_path_once(
         if joined > 0:
             continue
 
-        diagonal = WireSegment(s1.start, s2.end, s1.layer)
+        P, Q, c = _max_45_chamfer(s1, s2)
+        if c < 0.2:
+            continue
+        diagonal = WireSegment(P, Q, s1.layer)
         if _diagonal_collides(diagonal, psig, owner_without_self, buffer, own_voxels):
             continue
-
-        seg_len = lambda s: math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
-        orig_len = seg_len(s1) + seg_len(s2)
-        diag_len = seg_len(diagonal)
-        if orig_len - diag_len < 0.1:
+        saving = c * (2.0 - math.sqrt(2))
+        if saving < 0.1:
             continue
 
-        # Rebuild the path's elements list, replacing s1 + s2 with the diagonal.
+        # Build the replacement segment list. s1 may keep a residual
+        # (s1.start → P) if c < |s1|; s2 may keep a residual
+        # (Q → s2.end) if c < |s2|. At least one residual is empty
+        # because c = min(|s1|, |s2|).
+        eps = 1e-6
+        s1_residual = None
+        if math.hypot(P.x - s1.start.x, P.y - s1.start.y) > eps:
+            s1_residual = WireSegment(s1.start, P, s1.layer)
+        s2_residual = None
+        if math.hypot(s2.end.x - Q.x, s2.end.y - Q.y) > eps:
+            s2_residual = WireSegment(Q, s2.end, s2.layer)
+
         new_elements = []
         for elem in path.elements:
             if elem is s1:
+                if s1_residual is not None:
+                    new_elements.append(s1_residual)
                 new_elements.append(diagonal)
             elif elem is s2:
-                continue  # absorbed into diagonal
+                if s2_residual is not None:
+                    new_elements.append(s2_residual)
             else:
                 new_elements.append(elem)
-        return SignalPath(name=path.name, elements=tuple(new_elements)), orig_len - diag_len
+        return SignalPath(name=path.name, elements=tuple(new_elements)), saving
 
     return path, 0.0
 
@@ -354,13 +418,13 @@ def emit_markdown_report(sub_cls_name: str, suggestions: list[ChamferSuggestion]
     if not suggestions:
         return f"### {sub_cls_name}\n\nNo chamfer opportunities found.\n"
     lines = [f"### {sub_cls_name}\n"]
-    lines.append("| path | layer | elbow (x, y) | original length | diagonal length | saved |")
+    lines.append("| path | layer | elbow (x, y) | cut c | diagonal | saved |")
     lines.append("|---|---|---|---|---|---|")
     total_saved = 0.0
     for s in sorted(suggestions, key=lambda s: -s.saved_mm):
         lines.append(
             f"| {s.path_name} | L{s.layer} | ({s.elbow.x:.2f}, {s.elbow.y:.2f}) | "
-            f"{s.original_length:.2f} mm | {s.diagonal_length:.2f} mm | "
+            f"{s.cut_length:.2f} mm | {s.diagonal_length:.2f} mm | "
             f"{s.saved_mm:.2f} mm |"
         )
         total_saved += s.saved_mm
