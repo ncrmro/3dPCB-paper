@@ -1,0 +1,246 @@
+"""Voxel-based physical-overlap invariant for routed substrates.
+
+Every routing channel and every drilled hole has a physical extent
+(width, depth, layer-band z). Rasterize each into a 3D voxel grid.
+If two voxels are claimed by different "owners" (different signals,
+or a signal and a foreign pin hole), the wires would physically
+touch and short.
+
+This single test replaces the previous pair of hand-coded geometric
+checks (`no_same_layer_crossings` + `no_channel_traverses_foreign_pin_hole`)
+because rasterization handles diagonals, vias, partial-overlap, and
+any future topology uniformly — no per-shape math.
+
+Tests are parametrized over every routing-capable substrate class.
+Each class exposes its hole list via `_drilled_hole_positions()` and
+its routed nets via `_routed_nets()`.
+"""
+
+from __future__ import annotations
+
+import math
+
+import pytest
+
+from vitamins.substrate import (
+    Point2D,
+    Tier1Substrate,
+    Tier2Substrate,
+    Tier2SubstrateBundled,
+    WireSegment,
+)
+
+
+# Voxel grid resolution. 0.1 mm gives 8 voxels across an 0.8 mm channel
+# and 5 voxels across a 1.0 mm pin hole — fine enough that two channels
+# laid side-by-side with 0 mm clearance both claim the same boundary
+# voxel column and the test flags them.
+_VOXEL_RES = 0.1
+
+_BOARD_W = 80.0
+_BOARD_H = 50.0
+_THICKNESS = 3.0
+_CHANNEL_WIDTH = 0.8
+_CHANNEL_DEPTH = 0.8
+
+
+@pytest.fixture(
+    params=[Tier1Substrate, Tier2Substrate, Tier2SubstrateBundled],
+    ids=lambda cls: cls.__name__,
+)
+def substrate(request):
+    return request.param()
+
+
+# --- voxel coordinates -------------------------------------------------------
+
+
+def _to_vx(x: float) -> int:
+    return int(math.floor((x + _BOARD_W / 2) / _VOXEL_RES))
+
+
+def _to_vy(y: float) -> int:
+    return int(math.floor((y + _BOARD_H / 2) / _VOXEL_RES))
+
+
+def _to_vz(z: float) -> int:
+    return int(math.floor((z + _THICKNESS / 2) / _VOXEL_RES))
+
+
+def _vx_world(vx: int) -> float:
+    return (vx + 0.5) * _VOXEL_RES - _BOARD_W / 2
+
+
+def _vy_world(vy: int) -> float:
+    return (vy + 0.5) * _VOXEL_RES - _BOARD_H / 2
+
+
+# --- rasterizers -------------------------------------------------------------
+
+
+def _voxels_in_segment(seg: WireSegment):
+    """Yield (vx, vy, vz) for every voxel inside the segment's
+    channel-volume — `_CHANNEL_WIDTH` wide perpendicular to the
+    segment, `_CHANNEL_DEPTH` deep on the appropriate layer face."""
+    cw = _CHANNEL_WIDTH
+    cd = _CHANNEL_DEPTH
+    if seg.layer == 1:
+        z_lo = -_THICKNESS / 2
+        z_hi = z_lo + cd
+    else:
+        z_hi = _THICKNESS / 2
+        z_lo = z_hi - cd
+
+    dx = seg.end.x - seg.start.x
+    dy = seg.end.y - seg.start.y
+    L = math.hypot(dx, dy)
+    if L < 1e-9:
+        return
+    ux, uy = dx / L, dy / L
+    nx, ny = -uy, ux  # unit normal
+
+    bx_lo = min(seg.start.x, seg.end.x) - cw
+    bx_hi = max(seg.start.x, seg.end.x) + cw
+    by_lo = min(seg.start.y, seg.end.y) - cw
+    by_hi = max(seg.start.y, seg.end.y) + cw
+
+    vxl, vxh = _to_vx(bx_lo), _to_vx(bx_hi)
+    vyl, vyh = _to_vy(by_lo), _to_vy(by_hi)
+    vzl, vzh = _to_vz(z_lo), _to_vz(z_hi)
+
+    half_w = cw / 2
+    for vx in range(vxl, vxh + 1):
+        wx = _vx_world(vx)
+        for vy in range(vyl, vyh + 1):
+            wy = _vy_world(vy)
+            ax = wx - seg.start.x
+            ay = wy - seg.start.y
+            along = ax * ux + ay * uy
+            if along < -_VOXEL_RES / 2 or along > L + _VOXEL_RES / 2:
+                continue
+            perp = abs(ax * nx + ay * ny)
+            if perp > half_w:
+                continue
+            for vz in range(vzl, vzh + 1):
+                yield (vx, vy, vz)
+
+
+def _voxels_in_through_hole(cx: float, cy: float, diam: float):
+    """Yield voxels for a through-hole cylinder: substrate-bottom to
+    substrate-top, radius diam/2 around (cx, cy)."""
+    r = diam / 2
+    r_sq = r * r
+    vxl, vxh = _to_vx(cx - r), _to_vx(cx + r)
+    vyl, vyh = _to_vy(cy - r), _to_vy(cy + r)
+    vzl, vzh = _to_vz(-_THICKNESS / 2), _to_vz(_THICKNESS / 2 - 1e-9)
+    for vx in range(vxl, vxh + 1):
+        wx = _vx_world(vx)
+        dx_sq = (wx - cx) ** 2
+        if dx_sq > r_sq:
+            continue
+        for vy in range(vyl, vyh + 1):
+            wy = _vy_world(vy)
+            if dx_sq + (wy - cy) ** 2 > r_sq:
+                continue
+            for vz in range(vzl, vzh + 1):
+                yield (vx, vy, vz)
+
+
+# --- ownership lookup --------------------------------------------------------
+
+
+_SIGNAL_PREFIXES = ("vcc", "gnd", "scl", "sda")
+
+
+def _pin_signal_map(sub) -> dict[str, str]:
+    out: dict[str, str] = {}
+    for sig, net in sub._routed_nets().items():
+        out[f"{net.master_pin.ref}.{net.master_pin.number}"] = sig.name.lower()
+        for p in net.device_pins:
+            out[f"{p.ref}.{p.number}"] = sig.name.lower()
+    return out
+
+
+def _path_signal(path_name: str) -> str:
+    return path_name.split("_", 1)[0]
+
+
+def _hole_signal(name: str, pin_sig_map: dict[str, str]) -> str | None:
+    """Return the routed signal that owns a drilled hole, or None if
+    the hole is unrouted (e.g. SCL pin J1B.2 in the bundled topology)."""
+    if name in pin_sig_map:
+        return pin_sig_map[name]
+    prefix = name.split("_", 1)[0]
+    if prefix in _SIGNAL_PREFIXES:
+        return prefix
+    return None
+
+
+def _hole_diameter(sub, name: str) -> float:
+    d = sub.dim
+    if name.startswith("J4."):
+        return d.receptacle_diameter
+    if name.endswith("_via"):
+        return d.via_diameter
+    return d.hole_diameter
+
+
+# --- the test ----------------------------------------------------------------
+
+
+def test_no_voxel_overlap_between_signals(substrate):
+    """Rasterize every routed channel and every drilled hole into a
+    3D voxel grid. Each voxel records its owning signal (or None for
+    an unrouted hole). Two voxels with different owners overlapping
+    means the wires would physically touch — flagged as a collision.
+
+    Same-signal overlap is allowed (a wire entering its own pin hole
+    or via is the design intent)."""
+    paths = substrate._get_signal_paths()
+    holes = substrate._drilled_hole_positions()
+    sig_map = _pin_signal_map(substrate)
+
+    # owner: voxel → (kind, name, signal_or_None)
+    owner: dict[tuple[int, int, int], tuple[str, str, str | None]] = {}
+
+    # Holes first so wires hitting them get checked against the hole's owner.
+    for pt, name in holes:
+        hsig = _hole_signal(name, sig_map)
+        diam = _hole_diameter(substrate, name)
+        for v in _voxels_in_through_hole(pt.x, pt.y, diam):
+            owner[v] = ("hole", name, hsig)
+
+    collisions: list[str] = []
+    seen: set[tuple[str, str, str]] = set()
+
+    for path in paths:
+        psig = _path_signal(path.name)
+        for elem in path.elements:
+            if not isinstance(elem, WireSegment):
+                continue
+            for v in _voxels_in_segment(elem):
+                existing = owner.get(v)
+                if existing is None:
+                    owner[v] = ("wire", path.name, psig)
+                    continue
+                kind, name, esig = existing
+                if esig == psig:
+                    continue  # same signal — OK (or own pin/via)
+                key = (path.name, kind, name)
+                if key in seen:
+                    continue
+                seen.add(key)
+                wx = _vx_world(v[0])
+                wy = _vy_world(v[1])
+                if esig is None:
+                    collisions.append(
+                        f"path {path.name!r} L{elem.layer} intrudes on "
+                        f"{kind} {name!r} (unrouted) near ({wx:.2f}, {wy:.2f})"
+                    )
+                else:
+                    collisions.append(
+                        f"path {path.name!r} L{elem.layer} collides with "
+                        f"{kind} {name!r} signal {esig!r} near ({wx:.2f}, {wy:.2f})"
+                    )
+
+    assert not collisions, "\n".join(collisions)
