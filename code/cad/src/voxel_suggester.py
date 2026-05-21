@@ -50,6 +50,16 @@ from voxel_grid import (
 
 _SIGNAL_PREFIXES = ("vcc", "gnd", "scl", "sda")
 
+# Minimum axis-aligned residual length to leave on each leg of an
+# L-bend AFTER chamfering. Ensures the wire approaches every endpoint
+# (pin, via, return hole, junction) perpendicular for at least this
+# distance — bare copper wire can't bend sharply enough to enter a
+# pin barrel at 45° without binding. So a full-eat chamfer
+# (`c = min(|s1|, |s2|)`) is forbidden; instead `c` is capped at
+# `min(|s1|, |s2|) - _CHAMFER_MIN_RESIDUAL_MM` so neither residual
+# vanishes.
+_CHAMFER_MIN_RESIDUAL_MM = 1.5
+
 
 @dataclass
 class ChamferSuggestion:
@@ -95,16 +105,18 @@ def _max_45_chamfer(
       P is on s1, at distance c from the elbow back toward s1.start.
       Q is on s2, at distance c from the elbow forward toward s2.end.
       The chamfer diagonal P → Q is 45° (the cut is equal on both legs).
-      c = min(|s1|, |s2|) — the maximum cut that doesn't overshoot
-      either leg. Assumes s1 and s2 are axis-aligned and perpendicular
-      (caller checks via `_is_right_angle`)."""
+      c is capped at `min(|s1|, |s2|) - _CHAMFER_MIN_RESIDUAL_MM` so
+      neither leg fully vanishes — every endpoint keeps at least
+      `_CHAMFER_MIN_RESIDUAL_MM` of axis-aligned approach (no 45°
+      entry into a pin or via). If c would be < 0.2 mm under this
+      cap, c is returned as 0 (caller filters)."""
     a = _seg_length(s1)
     b = _seg_length(s2)
-    c = min(a, b)
-    # Unit vector FROM s1.end BACK toward s1.start (so P = s1.end + c · u1_back).
+    c = min(a, b) - _CHAMFER_MIN_RESIDUAL_MM
+    if c <= 0:
+        c = 0.0
     u1_back_x = (s1.start.x - s1.end.x) / a
     u1_back_y = (s1.start.y - s1.end.y) / a
-    # Unit vector FROM s2.start FORWARD toward s2.end.
     u2_fwd_x = (s2.end.x - s2.start.x) / b
     u2_fwd_y = (s2.end.y - s2.start.y) / b
     P = Point2D(s1.end.x + c * u1_back_x, s1.end.y + c * u1_back_y)
