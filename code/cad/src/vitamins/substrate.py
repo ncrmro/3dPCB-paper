@@ -553,34 +553,36 @@ _SCD41_CORRIDOR_YS = {
     "SDA": -14.0,
 }
 
-# Bus-signal master-to-OLED routing lives on L2 (the substrate's top
-# face) so it doesn't fight the existing VCC/GND L1 east legs. Each
-# bus signal wraps up through its J1B master pin onto L2, runs L2 to
-# the OLED pin, and only descends to L1 after the OLED return hole.
+# Bus-signal routing uses a north-shoulder highway on L2: each signal
+# escapes the ESP32 pocket on L1, transitions to L2 via an escape
+# through-hole drilled in clear substrate, then runs east along a
+# per-signal highway at the substrate's north shoulder (y ≈ +17/+18)
+# clear of the OLED pedestal (y ∈ [+8, +12]) and the substrate north
+# edge at +25. South stubs drop from the highway into the OLED pin
+# row at y=+10 and continue east to the SCD41 pin extensions.
 #
-# SCL: master at J1B.2 (-12.22, -14.46). Direct L2 north → east →
-#   south path to OLED J4.3 at (+1.27, +10). No east-jog needed —
-#   the master column at x=-12.22 has no other drilled J1B pin
-#   between J1B.2 and the highway y, so the L2 north leg is clear.
+# Highway ys give each bus signal its own L2 row so two east-runs
+# don't share a corridor — 1 mm separation is enough for 0.8 mm
+# channels (0.2 mm wall between edges).
+#
+# SCL: master at J1B.2 (-12.22, -14.46). L1 east escape to (-10,
+#   -14.46), via to L2, L2 north to highway, then east.
 # SDA: master at J1B.1 (-12.22, -17). L2 north at x=-12.22 would
 #   pass through the SCL master pin hole at J1B.2 (foreign-pin
-#   intrusion). SDA detours: L2 south to y=-21 below every pocket,
-#   L2 east to x=+17 (in the open gap between SCD41 and BH1750
-#   pockets), L2 north up to the highway, L2 west to OLED column.
-_BUS_HIGHWAY_YS = {"SCL": 13.0, "SDA": 14.0}
+#   intrusion). SDA detours: L1 south to y=-21 (below every pocket
+#   south edge), via to L2, L2 east to x=+1.5 (in the open gap
+#   between ESP32 east edge at -12.11 and SCD41 west edge at +2.16),
+#   L2 north up to highway. The +1.5 column is chosen so the x=+17
+#   gap between SCD41 and BH1750 stays free for the SCL J2.3 bridge.
+_BUS_HIGHWAY_YS = {"SCL": 17.0, "SDA": 19.0}
 _SDA_SOUTH_DETOUR_Y = -21.0
-_SDA_ESCAPE_X = 17.0  # between SCD41 (x≤15.46) and BH1750 (x≥18.08) pockets
-
-# Each SCL/SDA stub into its SCD41 pin crosses VCC's east leg at
-# y=-16. An L2 bridge with via diameter 1.5 mm needs >=0.75 mm
-# clearance from VCC's channel — so bridge endpoints are placed at
-# y=-14.0 (north, well clear of VCC's 0.8 mm channel at y=-16) and
-# y=-17.5 (south, between VCC east and GND east, just south of the
-# sensor pin row). The bottom via overlaps the SCD41 pin hole in xy
-# — that's deliberate, both belong to the same signal so they
-# union into one continuous opening.
-_BUS_BRIDGE_TOP_YS = {"SCL": -14.0, "SDA": -13.0}
-_BUS_BRIDGE_BOTTOM_Y = -17.5
+# SDA's L2 vertical climbs from the south band at y=-21 to its
+# highway at y=+19. The column sits in the SCD41/BH1750 gap
+# (+15.46 to +18.08) at x=+17 — clear of SCL's highway extent
+# (which ends at OLED column +1.27 since no sensor extensions are
+# routed). SDA highway at +19 vs SCL at +17 gives 1.2 mm channel
+# gap on the north shoulder.
+_SDA_NORTH_ESCAPE_X = 17.0  # SCD41/BH1750 gap [+15.46, +18.08]
 
 
 def _build_oled_only_power_paths(nets: dict) -> List[SignalPath]:
@@ -671,25 +673,50 @@ _BUS_L1_ESCAPE_X = -10.0  # 2 mm east of ESP32 pocket east edge (-12.11)
 
 
 def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
-    """Master → OLED snake per bus signal (terminal at OLED). Sensor-
-    side extensions are deferred — each stub would need multiple L2
-    bridges over the power corridors.
+    """North-shoulder highway routing per bus signal: master → OLED.
+    Sensor extensions (SCD41 + BH1750) remain deferred — see the
+    note at the end of this docstring.
 
     The J1B master pins sit INSIDE the ESP32 PCB footprint (PCB is
     18 × 22.5 mm and the J1B column at x=-12.22 is ~0.1 mm inside
     the pocket east edge at -12.11). An L2 segment emerging directly
-    from a J1B master would lie in the pocket cavity at the same
-    z as the ESP32 PCB and short into the board. So each bus signal
-    escapes on L1 first (below the pocket, where pocket-on-top
-    doesn't interact with channels-on-bottom), out to a column
+    from a J1B master would short into the ESP32 board. Each bus
+    signal escapes on L1 first (below the pocket), out to a column
     clear of the pocket, then transitions to L2 via an explicit
-    through-hole:
+    through-hole.
 
-      SCL: L1 east stub from J1B.2(-12.22,-14.46) to (-10,-14.46),
-           via at (-10,-14.46), L2 north → east → south to J4.3.
-      SDA: L1 south from J1B.1(-12.22,-17) to (-12.22,-21) (past
-           every pocket south edge on L1), via at (-12.22,-21), L2
-           east → north → west → south to J4.4."""
+    Topology:
+      SCL: L1 east escape from J1B.2 (-12.22, -14.46) → (-10, -14.46),
+           via to L2, L2 north to highway y=+17, L2 east along the
+           highway, south drop into OLED J4.3 at (+1.27, +10).
+      SDA: L1 south escape from J1B.1 (-12.22, -17) → (-12.22, -21)
+           past all pocket south edges, via to L2, L2 east to x=+17
+           (in the gap between SCD41 east at +15.46 and BH1750 west
+           at +18.08), L2 north to highway y=+19, L2 west to OLED
+           J4.4 at (+3.81, +10). SDA highway is staggered 2 mm
+           north of SCL's to keep the two parallel east-runs from
+           sharing channel y.
+
+    Deferred sensor extensions (SCD41 + BH1750):
+      The route from highway to any sensor pin must cross VCC's L1
+      east corridor at y=-16 (sensor pins sit at y=-17, between VCC
+      at -16 and GND at -19). A bridge requires placing the
+      transition via in clear substrate, which only exists in the
+      narrow SCD41/BH1750 gap (+15.46..+18.08) and east of BH1750
+      (>+32.08). After the bridge, the L1 east-west return at
+      y≈-18 must traverse multiple sensor x columns — but GND's
+      north stubs (corridor y=-19 → pin y=-17) occupy y∈[-19,-17]
+      at each GND sensor pin column (J2.2 at +7.54, J3.4 at
+      +27.62), blocking any L1 east-west run between GND corridor
+      and pin row.
+
+      Resolving this requires either: (a) restructuring the VCC/GND
+      power topology so both corridors sit on the same side of the
+      pin row, freeing the opposite-side y-band for bus returns; or
+      (b) routing each bus stub through an OLED-style return-hole
+      pattern that bypasses the corridor crossings via a dedicated
+      drilled hole north of pin row. Both are larger structural
+      changes than the highway relocation."""
     from netlist import I2cSignal
     paths: List[SignalPath] = []
     sig_map = {"SCL": I2cSignal.SCL, "SDA": I2cSignal.SDA}
@@ -711,9 +738,9 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
             # L1 south past the ESP32 pocket south edge, then via to L2.
             l1_end = Point2D(master.x, _SDA_SOUTH_DETOUR_Y)
             elements.append(WireSegment(master, l1_end, 1))
-            east = Point2D(_SDA_ESCAPE_X, _SDA_SOUTH_DETOUR_Y)
+            east = Point2D(_SDA_NORTH_ESCAPE_X, _SDA_SOUTH_DETOUR_Y)
             elements.append(WireSegment(l1_end, east, 2))
-            rise = Point2D(_SDA_ESCAPE_X, highway_y)
+            rise = Point2D(_SDA_NORTH_ESCAPE_X, highway_y)
             elements.append(WireSegment(east, rise, 2))
             oled_corner = Point2D(oled_xy.x, highway_y)
             elements.append(WireSegment(rise, oled_corner, 2))
@@ -734,9 +761,10 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
 
 
 def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
-    """L1→L2 escape vias for each bus signal, drilled in clear
-    substrate just outside the ESP32 pocket so the L2 segment never
-    lies in the pocket cavity (where it would touch the ESP32 PCB)."""
+    """L1→L2 escape vias for each bus signal (drilled at via_diameter
+    = 1.5 mm). These sit just outside the ESP32 pocket where the
+    extra width is harmless. SCD41-extension transitions use a
+    smaller drill — see `_bus_scd41_bridge_hole_positions`."""
     from netlist import I2cSignal
     out: list[tuple[Point2D, str]] = []
     net_scl = nets.get(I2cSignal.SCL)
@@ -751,14 +779,15 @@ def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
 
 
 def _oled_only_return_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
-    """Position of the L2→L1 return through-hole south of each OLED pin."""
+    """Position of the L2→L1 return through-hole south of each OLED
+    POWER pin. Bus signals (SCL/SDA) terminate at the OLED pin (or
+    continue east on the highway) and never use a return hole, so
+    they're excluded."""
     from netlist import I2cSignal
     out: list[tuple[Point2D, str]] = []
     for name, sig in (
         ("vcc", I2cSignal.VCC),
         ("gnd", I2cSignal.GND),
-        ("scl", I2cSignal.SCL),
-        ("sda", I2cSignal.SDA),
     ):
         net = nets.get(sig)
         if net is None:
