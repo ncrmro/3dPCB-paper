@@ -667,22 +667,29 @@ def _build_oled_only_power_paths(nets: dict) -> List[SignalPath]:
     return paths
 
 
-def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
-    """Master → OLED snake per bus signal (terminal at OLED). The
-    sensor-side extensions (SCL/SDA → SCD41 → BH1750) are deferred —
-    each stub would need an L2 bridge over VCC east at y=-16 AND
-    another over GND east at y=-19, plus careful L2-vs-L2 separation
-    between the two bus signals. That'd cost ~6 extra vias per bus
-    signal and a corridor restructure; left for a follow-up.
+_BUS_L1_ESCAPE_X = -10.0  # 2 mm east of ESP32 pocket east edge (-12.11)
 
-    The master-to-OLED leg routes entirely on L2 so it sidesteps
-    every VCC/GND L1 east leg:
-      SCL: L2 north at x=-12.22 (master column), east at y=+13,
-           south to OLED J4.3.
-      SDA: L2 south to y=-21 (below every pocket), east to x=+17
-           (gap between SCD41 and BH1750), north to y=+14, west to
-           OLED J4.4. A direct L2 north at x=-12.22 would punch
-           through SCL's master pin at J1B.2."""
+
+def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
+    """Master → OLED snake per bus signal (terminal at OLED). Sensor-
+    side extensions are deferred — each stub would need multiple L2
+    bridges over the power corridors.
+
+    The J1B master pins sit INSIDE the ESP32 PCB footprint (PCB is
+    18 × 22.5 mm and the J1B column at x=-12.22 is ~0.1 mm inside
+    the pocket east edge at -12.11). An L2 segment emerging directly
+    from a J1B master would lie in the pocket cavity at the same
+    z as the ESP32 PCB and short into the board. So each bus signal
+    escapes on L1 first (below the pocket, where pocket-on-top
+    doesn't interact with channels-on-bottom), out to a column
+    clear of the pocket, then transitions to L2 via an explicit
+    through-hole:
+
+      SCL: L1 east stub from J1B.2(-12.22,-14.46) to (-10,-14.46),
+           via at (-10,-14.46), L2 north → east → south to J4.3.
+      SDA: L1 south from J1B.1(-12.22,-17) to (-12.22,-21) (past
+           every pocket south edge on L1), via at (-12.22,-21), L2
+           east → north → west → south to J4.4."""
     from netlist import I2cSignal
     paths: List[SignalPath] = []
     sig_map = {"SCL": I2cSignal.SCL, "SDA": I2cSignal.SDA}
@@ -701,18 +708,22 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
         elements: List = []
 
         if name == "SDA":
-            south = Point2D(master.x, _SDA_SOUTH_DETOUR_Y)
-            elements.append(WireSegment(master, south, 2))
+            # L1 south past the ESP32 pocket south edge, then via to L2.
+            l1_end = Point2D(master.x, _SDA_SOUTH_DETOUR_Y)
+            elements.append(WireSegment(master, l1_end, 1))
             east = Point2D(_SDA_ESCAPE_X, _SDA_SOUTH_DETOUR_Y)
-            elements.append(WireSegment(south, east, 2))
+            elements.append(WireSegment(l1_end, east, 2))
             rise = Point2D(_SDA_ESCAPE_X, highway_y)
             elements.append(WireSegment(east, rise, 2))
             oled_corner = Point2D(oled_xy.x, highway_y)
             elements.append(WireSegment(rise, oled_corner, 2))
             elements.append(WireSegment(oled_corner, oled_xy, 2))
         else:  # SCL
-            rise = Point2D(master.x, highway_y)
-            elements.append(WireSegment(master, rise, 2))
+            # L1 east past the ESP32 pocket east edge, then via to L2.
+            l1_end = Point2D(_BUS_L1_ESCAPE_X, master.y)
+            elements.append(WireSegment(master, l1_end, 1))
+            rise = Point2D(_BUS_L1_ESCAPE_X, highway_y)
+            elements.append(WireSegment(l1_end, rise, 2))
             oled_corner = Point2D(oled_xy.x, highway_y)
             elements.append(WireSegment(rise, oled_corner, 2))
             elements.append(WireSegment(oled_corner, oled_xy, 2))
@@ -723,8 +734,20 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
 
 
 def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
-    """No bridge vias in the OLED-terminal bus topology."""
-    return []
+    """L1→L2 escape vias for each bus signal, drilled in clear
+    substrate just outside the ESP32 pocket so the L2 segment never
+    lies in the pocket cavity (where it would touch the ESP32 PCB)."""
+    from netlist import I2cSignal
+    out: list[tuple[Point2D, str]] = []
+    net_scl = nets.get(I2cSignal.SCL)
+    if net_scl is not None:
+        master_scl = _pin_position(net_scl.master_pin)
+        out.append((Point2D(_BUS_L1_ESCAPE_X, master_scl.y), "scl_escape_via"))
+    net_sda = nets.get(I2cSignal.SDA)
+    if net_sda is not None:
+        master_sda = _pin_position(net_sda.master_pin)
+        out.append((Point2D(master_sda.x, _SDA_SOUTH_DETOUR_Y), "sda_escape_via"))
+    return out
 
 
 def _oled_only_return_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
@@ -892,6 +915,30 @@ class Tier1Substrate(ad.CompositeShape):
         subclass extras (OLED receptacles, return holes, vias).
         Subclasses override to extend the standard list."""
         return list(self._standard_hole_positions())
+
+    def _module_pcb_footprints(self) -> list[tuple[str, float, float, float, float]]:
+        """Sensor PCB xy footprints (= pocket footprints).
+
+        Returns (name, cx, cy, half_w, half_l) per module. Sensor PCBs
+        physically sit IN the pocket cavities, occupying the same
+        z-band as L2 routing channels — any L2 wire whose xy lands
+        inside one of these footprints would short into the module
+        PCB. The voxel test uses this list to forbid L2 wires in
+        sensor pocket xy. OLED PCB is excluded: it sits above the
+        pedestal at z≈+9, well clear of L2's z=+0.7..+1.5 band, so
+        L2 wires under the OLED PCB don't make contact."""
+        d = self.dim
+        esp_cx = (_J1A_X + _J1B_X) / 2
+        esp_cy = _J1A_Y + 4 * _PITCH
+        scd_cx = _J2_X + 1.5 * _PITCH
+        scd_cy = _J2_Y + d.scd41.depth / 2 - d.scd41.header_body_width / 2
+        bh_cx = _J3_X + 2.0 * _PITCH
+        bh_cy = _J3_Y + d.bh1750.depth / 2 - d.bh1750.header_body_width / 2
+        return [
+            ("ESP32",  esp_cx, esp_cy, d.esp32.width  / 2, d.esp32.length / 2),
+            ("SCD41",  scd_cx, scd_cy, d.scd41.width  / 2, d.scd41.depth  / 2),
+            ("BH1750", bh_cx,  bh_cy,  d.bh1750.width / 2, d.bh1750.depth / 2),
+        ]
 
     def build(self) -> ad.Maker:
         d = self.dim

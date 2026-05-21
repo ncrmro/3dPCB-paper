@@ -146,6 +146,22 @@ def _voxels_in_through_hole(cx: float, cy: float, diam: float):
                 yield (vx, vy, vz)
 
 
+def _voxels_in_pcb_footprint_l2(cx: float, cy: float, half_w: float, half_l: float):
+    """Yield voxels at the L2 z-band inside a module PCB's xy
+    footprint. The PCB sits in the pocket cavity at z = +0.7..+1.5,
+    occupying the same band as L2 routing channels — any L2 wire
+    voxel here would short into the PCB."""
+    z_hi = _THICKNESS / 2
+    z_lo = z_hi - _CHANNEL_DEPTH
+    vxl, vxh = _to_vx(cx - half_w), _to_vx(cx + half_w)
+    vyl, vyh = _to_vy(cy - half_l), _to_vy(cy + half_l)
+    vzl, vzh = _to_vz(z_lo), _to_vz(z_hi - 1e-9)
+    for vx in range(vxl, vxh + 1):
+        for vy in range(vyl, vyh + 1):
+            for vz in range(vzl, vzh + 1):
+                yield (vx, vy, vz)
+
+
 # --- ownership lookup --------------------------------------------------------
 
 
@@ -203,7 +219,17 @@ def test_no_voxel_overlap_between_signals(substrate):
     # owner: voxel → (kind, name, signal_or_None)
     owner: dict[tuple[int, int, int], tuple[str, str, str | None]] = {}
 
-    # Holes first so wires hitting them get checked against the hole's owner.
+    # Sensor PCB footprints at the L2 z-band — boards sitting in
+    # pocket cavities. Marked first so wires landing here are flagged
+    # as board-contact (signal-less owner). Pin-hole voxels overwrite
+    # these (a pin hole inside a pocket is a deliberate cut through
+    # the PCB and the wire IS supposed to reach it).
+    for board_name, cx, cy, hw, hl in substrate._module_pcb_footprints():
+        for v in _voxels_in_pcb_footprint_l2(cx, cy, hw, hl):
+            owner[v] = ("board", board_name, None)
+
+    # Holes next (override board voxels at pin xy — the pin hole is
+    # a through-hole CUT through the PCB and the wire reaches it).
     for pt, name in holes:
         hsig = _hole_signal(name, sig_map)
         diam = _hole_diameter(substrate, name)
