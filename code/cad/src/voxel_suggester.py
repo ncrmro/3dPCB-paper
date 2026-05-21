@@ -113,9 +113,18 @@ def _hole_diameter(sub, name: str) -> float:
 
 
 def _build_owner_grid(sub) -> dict[tuple[int, int, int], tuple[str, str, str | None]]:
-    """Rasterize every existing feature into a voxel-owner dict — same
-    grid the routing-overlap test builds, but exposed here for the
-    suggester to query against."""
+    """Rasterize every existing feature into a voxel-owner dict using
+    `sub._get_signal_paths()` as the wire set."""
+    return _build_owner_grid_from(sub, sub._get_signal_paths())
+
+
+def _build_owner_grid_from(
+    sub,
+    paths: Iterable[SignalPath],
+) -> dict[tuple[int, int, int], tuple[str, str, str | None]]:
+    """Rasterize boards, holes, and a given path set into a voxel-owner
+    dict. Exposed so chamfer-application can rebuild against the
+    in-progress (partly chamfered) path list."""
     buffer = sub.dim.min_wall_thickness / 2.0
     owner: dict[tuple[int, int, int], tuple[str, str, str | None]] = {}
 
@@ -130,14 +139,12 @@ def _build_owner_grid(sub) -> dict[tuple[int, int, int], tuple[str, str, str | N
         for v in voxels_in_through_hole(pt.x, pt.y, diam, buffer=buffer):
             owner[v] = ("hole", name, hsig)
 
-    for path in sub._get_signal_paths():
+    for path in paths:
         psig = _path_signal(path.name)
         for elem in path.elements:
             if not isinstance(elem, WireSegment):
                 continue
             for v in voxels_in_segment(elem, buffer=buffer):
-                # Don't overwrite hole/board ownership at the same voxel —
-                # those are already correctly owned.
                 if v not in owner:
                     owner[v] = ("wire", path.name, psig)
     return owner
@@ -168,16 +175,24 @@ def _diagonal_collides(
     return False
 
 
-def find_chamfer_suggestions(sub) -> list[ChamferSuggestion]:
-    """Return all chamfer opportunities for `sub`. A chamfer
-    opportunity is an L-bend in some routed path whose diagonal
-    alternative passes the wall-buffer voxel test against all other
-    features."""
+def find_chamfer_suggestions(sub, paths: Iterable[SignalPath] | None = None) -> list[ChamferSuggestion]:
+    """Return all chamfer opportunities. A chamfer opportunity is an
+    L-bend in some routed path whose diagonal alternative passes the
+    wall-buffer voxel test against all other features.
+
+    `paths` defaults to `sub._get_signal_paths()` — pass an explicit
+    list to inspect non-default path sets (e.g. when applying
+    chamfers in `apply_chamfers`, the intermediate orthogonal paths
+    must be evaluated, not the post-chamfer ones)."""
     suggestions: list[ChamferSuggestion] = []
-    owner = _build_owner_grid(sub)
+    if paths is None:
+        paths = list(sub._get_signal_paths())
+    else:
+        paths = list(paths)
+    owner = _build_owner_grid_from(sub, paths)
     buffer = sub.dim.min_wall_thickness / 2.0
 
-    for path in sub._get_signal_paths():
+    for path in paths:
         psig = _path_signal(path.name)
         wire_segs = [e for e in path.elements if isinstance(e, WireSegment)]
 
@@ -229,6 +244,107 @@ def find_chamfer_suggestions(sub) -> list[ChamferSuggestion]:
                 original_length=orig_len,
             ))
     return suggestions
+
+
+# --- chamfer application ----------------------------------------------------
+
+
+def _chamfer_path_once(
+    path: SignalPath,
+    sub,
+    owner_without_self: dict[tuple[int, int, int], tuple[str, str, str | None]],
+    buffer: float,
+) -> tuple[SignalPath, float]:
+    """Try to apply one safe chamfer to `path`. Returns the (possibly
+    new) path and the saved-mm amount. If no safe chamfer is found,
+    returns the original path and 0.
+
+    Strategy: scan consecutive segment pairs left-to-right, take the
+    FIRST safe non-junction L-bend whose diagonal passes the
+    buffer test. (Greedy — not optimal, but adequate for the
+    current paths.)"""
+    wire_segs: list[WireSegment] = []
+    others: list = []  # non-WireSegment elements (vias) and their indices
+    for elem in path.elements:
+        if isinstance(elem, WireSegment):
+            wire_segs.append(elem)
+        else:
+            others.append(elem)
+
+    # Own voxels — exempt from the diagonal-collision check.
+    own_voxels: set[tuple[int, int, int]] = set()
+    for seg in wire_segs:
+        for v in voxels_in_segment(seg, buffer=buffer):
+            own_voxels.add(v)
+
+    psig = _path_signal(path.name)
+
+    for i in range(len(wire_segs) - 1):
+        s1 = wire_segs[i]
+        s2 = wire_segs[i + 1]
+        if not _is_right_angle(s1, s2):
+            continue
+        elbow = s1.end
+        joined = 0
+        for seg in wire_segs:
+            if seg is s1 or seg is s2:
+                continue
+            if seg.layer != s1.layer:
+                continue
+            if seg.start == elbow or seg.end == elbow:
+                joined += 1
+        if joined > 0:
+            continue
+
+        diagonal = WireSegment(s1.start, s2.end, s1.layer)
+        if _diagonal_collides(diagonal, psig, owner_without_self, buffer, own_voxels):
+            continue
+
+        seg_len = lambda s: math.hypot(s.end.x - s.start.x, s.end.y - s.start.y)
+        orig_len = seg_len(s1) + seg_len(s2)
+        diag_len = seg_len(diagonal)
+        if orig_len - diag_len < 0.1:
+            continue
+
+        # Rebuild the path's elements list, replacing s1 + s2 with the diagonal.
+        new_elements = []
+        for elem in path.elements:
+            if elem is s1:
+                new_elements.append(diagonal)
+            elif elem is s2:
+                continue  # absorbed into diagonal
+            else:
+                new_elements.append(elem)
+        return SignalPath(name=path.name, elements=tuple(new_elements)), orig_len - diag_len
+
+    return path, 0.0
+
+
+def apply_chamfers(sub, paths: Iterable[SignalPath]) -> list[SignalPath]:
+    """Apply all safe 45° chamfers to `paths`. Iterates until no more
+    chamfers can be applied — each pass re-builds the owner grid
+    against the current (partly chamfered) path set so adjacent
+    chamfers can compose.
+
+    Same-signal voxel overlap is allowed; the diagonal only fails if
+    it intrudes on a different-signal channel, a foreign pin hole,
+    or a module PCB footprint at the L2 z-band."""
+    paths = list(paths)
+    buffer = sub.dim.min_wall_thickness / 2.0
+    # Cap iterations — should converge in O(elbows) but be defensive.
+    for _ in range(64):
+        any_change = False
+        for i, path in enumerate(paths):
+            owner = _build_owner_grid_from(
+                sub, [p for j, p in enumerate(paths) if j != i]
+            )
+            new_path, saved = _chamfer_path_once(path, sub, owner, buffer)
+            if saved > 0.0:
+                paths[i] = new_path
+                any_change = True
+        if not any_change:
+            break
+    return paths
 
 
 # --- markdown report --------------------------------------------------------
