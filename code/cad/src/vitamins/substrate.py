@@ -816,6 +816,13 @@ class Tier1SubstrateDimensions:
     via_diameter: float = 1.5
     pocket_clearance: float = 0.3
     overcut: float = 0.1
+    # Minimum substrate-wall thickness between any two voids (channel,
+    # hole, via, pocket). Below this floor an FDM printer at 0.4 mm
+    # nozzle merges the two voids into one — see
+    # `docs/fdm_tolerance_notes.md`. The routing voxel test inflates
+    # each void by `min_wall_thickness / 2` and flags inflated overlaps
+    # between different signals as a wall-thickness failure.
+    min_wall_thickness: float = 0.6
     # Receptacle hole diameter for OLED male DuPont pin (~0.64 mm pin).
     # Smaller than `hole_diameter` so the printed plastic grips by
     # interference fit.

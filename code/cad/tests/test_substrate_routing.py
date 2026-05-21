@@ -1,10 +1,14 @@
 """Voxel-based physical-overlap invariant for routed substrates.
 
 Every routing channel and every drilled hole has a physical extent
-(width, depth, layer-band z). Rasterize each into a 3D voxel grid.
-If two voxels are claimed by different "owners" (different signals,
-or a signal and a foreign pin hole), the wires would physically
-touch and short.
+(width, depth, layer-band z). Rasterize each into a 3D voxel grid
+inflated by half the substrate's `min_wall_thickness` (the FDM
+printability floor). If two voxels are claimed by different "owners"
+(different signals, or a signal and a foreign pin hole), either the
+wires would physically touch and short, OR the substrate wall between
+them is below the printable floor and the two voids merge during
+printing — failure mode #7 in
+`.deepwork/jobs/printable_pcb/job.yml`.
 
 This single test replaces the previous pair of hand-coded geometric
 checks (`no_same_layer_crossings` + `no_channel_traverses_foreign_pin_hole`)
@@ -78,11 +82,17 @@ def _vy_world(vy: int) -> float:
 # --- rasterizers -------------------------------------------------------------
 
 
-def _voxels_in_segment(seg: WireSegment):
+def _voxels_in_segment(seg: WireSegment, buffer: float = 0.0):
     """Yield (vx, vy, vz) for every voxel inside the segment's
-    channel-volume — `_CHANNEL_WIDTH` wide perpendicular to the
-    segment, `_CHANNEL_DEPTH` deep on the appropriate layer face."""
-    cw = _CHANNEL_WIDTH
+    channel-volume inflated by `buffer` mm perpendicular to the
+    segment — full inflated width is `_CHANNEL_WIDTH + 2*buffer`,
+    depth stays `_CHANNEL_DEPTH` on the appropriate layer face.
+
+    z is NOT inflated: L1 (substrate bottom) and L2 (substrate top)
+    are vertically separated by ~1.4 mm of substrate body — a wall
+    much thicker than the printable floor, so even a buffered L1
+    channel doesn't reach into the L2 z-band."""
+    cw = _CHANNEL_WIDTH + 2.0 * buffer
     cd = _CHANNEL_DEPTH
     if seg.layer == 1:
         z_lo = -_THICKNESS / 2
@@ -109,6 +119,7 @@ def _voxels_in_segment(seg: WireSegment):
     vzl, vzh = _to_vz(z_lo), _to_vz(z_hi)
 
     half_w = cw / 2
+    along_pad = buffer + _VOXEL_RES / 2  # extend segment ends by buffer too
     for vx in range(vxl, vxh + 1):
         wx = _vx_world(vx)
         for vy in range(vyl, vyh + 1):
@@ -116,7 +127,7 @@ def _voxels_in_segment(seg: WireSegment):
             ax = wx - seg.start.x
             ay = wy - seg.start.y
             along = ax * ux + ay * uy
-            if along < -_VOXEL_RES / 2 or along > L + _VOXEL_RES / 2:
+            if along < -along_pad or along > L + along_pad:
                 continue
             perp = abs(ax * nx + ay * ny)
             if perp > half_w:
@@ -125,10 +136,11 @@ def _voxels_in_segment(seg: WireSegment):
                 yield (vx, vy, vz)
 
 
-def _voxels_in_through_hole(cx: float, cy: float, diam: float):
-    """Yield voxels for a through-hole cylinder: substrate-bottom to
-    substrate-top, radius diam/2 around (cx, cy)."""
-    r = diam / 2
+def _voxels_in_through_hole(cx: float, cy: float, diam: float, buffer: float = 0.0):
+    """Yield voxels for a through-hole cylinder inflated by `buffer`
+    mm: substrate-bottom to substrate-top, radius (diam/2 + buffer)
+    around (cx, cy)."""
+    r = diam / 2 + buffer
     r_sq = r * r
     vxl, vxh = _to_vx(cx - r), _to_vx(cx + r)
     vyl, vyh = _to_vy(cy - r), _to_vy(cy + r)
@@ -206,15 +218,24 @@ def _hole_diameter(sub, name: str) -> float:
 
 def test_no_voxel_overlap_between_signals(substrate):
     """Rasterize every routed channel and every drilled hole into a
-    3D voxel grid. Each voxel records its owning signal (or None for
-    an unrouted hole). Two voxels with different owners overlapping
-    means the wires would physically touch — flagged as a collision.
+    3D voxel grid, INFLATED by half the substrate's `min_wall_thickness`
+    so the test catches not just zero-distance overlap but also
+    sub-printable wall thickness between adjacent voids (failure mode #7).
+    Each voxel records its owning signal (or None for an unrouted hole).
+    Two voxels with different owners overlapping means EITHER the wires
+    physically touch and short, OR the substrate wall between them is
+    below the FDM printable floor and the two voids merge during print.
 
     Same-signal overlap is allowed (a wire entering its own pin hole
-    or via is the design intent)."""
+    or via is the design intent).
+
+    Board footprints are NOT inflated — they're physical PCBs, not
+    substrate voids, so they're subject to direct-contact rules but
+    not to wall-thickness rules."""
     paths = substrate._get_signal_paths()
     holes = substrate._drilled_hole_positions()
     sig_map = _pin_signal_map(substrate)
+    buffer = substrate.dim.min_wall_thickness / 2.0
 
     # owner: voxel → (kind, name, signal_or_None)
     owner: dict[tuple[int, int, int], tuple[str, str, str | None]] = {}
@@ -223,17 +244,19 @@ def test_no_voxel_overlap_between_signals(substrate):
     # pocket cavities. Marked first so wires landing here are flagged
     # as board-contact (signal-less owner). Pin-hole voxels overwrite
     # these (a pin hole inside a pocket is a deliberate cut through
-    # the PCB and the wire IS supposed to reach it).
+    # the PCB and the wire IS supposed to reach it). Not inflated.
     for board_name, cx, cy, hw, hl in substrate._module_pcb_footprints():
         for v in _voxels_in_pcb_footprint_l2(cx, cy, hw, hl):
             owner[v] = ("board", board_name, None)
 
     # Holes next (override board voxels at pin xy — the pin hole is
     # a through-hole CUT through the PCB and the wire reaches it).
+    # Inflated by `buffer` so a foreign channel passing too close
+    # to a pin hole trips on the inflated boundary.
     for pt, name in holes:
         hsig = _hole_signal(name, sig_map)
         diam = _hole_diameter(substrate, name)
-        for v in _voxels_in_through_hole(pt.x, pt.y, diam):
+        for v in _voxels_in_through_hole(pt.x, pt.y, diam, buffer=buffer):
             owner[v] = ("hole", name, hsig)
 
     collisions: list[str] = []
@@ -244,7 +267,7 @@ def test_no_voxel_overlap_between_signals(substrate):
         for elem in path.elements:
             if not isinstance(elem, WireSegment):
                 continue
-            for v in _voxels_in_segment(elem):
+            for v in _voxels_in_segment(elem, buffer=buffer):
                 existing = owner.get(v)
                 if existing is None:
                     owner[v] = ("wire", path.name, psig)
