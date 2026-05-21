@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+# Advisory pass: emit 45° chamfer suggestions for axis-aligned L-bends
+# in routed substrate paths that still satisfy the printable wall buffer.
+# Outputs a markdown report to stdout.
+#
+# This does NOT fail — substrates can ignore the suggestions. The
+# voxel-collision gate at tests/test_substrate_routing.py is the
+# authoritative correctness check; this script is an optimization aid.
+set -euo pipefail
+CAD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec uv --project "$CAD_DIR" run env PYTHONPATH="$CAD_DIR/src" \
+    python -m voxel_suggester "$@"

@@ -156,6 +156,12 @@ workflows:
          pocket cavity. Pin through-holes ARE allowed inside pocket xy —
          they cut through the PCB at the pin location; only the wire CHANNEL
          must avoid pocket xy on L2.
+         The voxel test treats the entire PCB back as forbidden, which is
+         conservative — most module backs are largely silkscreened with
+         only pin barrels and a few exposed regions actually conductive.
+         See `docs/module_back_conductivity.md` for the per-module audit
+         (SCD41, BH1750, ESP32-C3, OLED) and a future-refinement plan
+         that carves out non-conductive regions as allowed L2 xy.
       6. **Bus-return blocked by power-corridor north stubs**: when the
          substrate has VCC and GND L1 east legs both within ~2 mm of the
          sensor pin row (e.g. VCC at y=-16, GND at y=-19, pins at y=-17),
@@ -356,6 +362,22 @@ workflows:
           required (the test covers geometry but the report serves as
           human-readable documentation of WHY each net is collision-free,
           including the layer and rationale for any non-obvious routing).
+
+          ## Routing suggestions (advisory)
+
+          After the voxel test passes, also run the advisory chamfer
+          suggester:
+
+              .deepwork/jobs/printable_pcb/scripts/run_voxel_suggestions.sh
+
+          The script emits a markdown report listing axis-aligned
+          L-bends in each substrate's routed paths whose 45° diagonal
+          alternative still satisfies the printable wall buffer
+          (failure mode #7). Copy its output verbatim into a
+          "Routing suggestions (advisory)" section of routing_check.md.
+          The overall verdict is NOT affected — these are
+          optimization hints, not failures. A reviewer or follow-up
+          PR can act on them as a separate change.
 
           ## Source of truth
 
