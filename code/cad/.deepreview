@@ -1,0 +1,39 @@
+substrate_voxel_check:
+  description: "Run the geometric voxel test on every PR that touches substrate.py or the routing test itself — catches collisions before merge."
+  match:
+    include:
+      - "src/vitamins/substrate.py"
+      - "tests/test_substrate_routing.py"
+  review:
+    strategy: all_changed_files
+    instructions: |
+      A change to substrate.py (routing topology) or test_substrate_routing.py
+      (the voxel gate itself) must be validated by running the voxel test
+      from the repo root:
+
+          .deepwork/jobs/printable_pcb/scripts/run_voxel_check.sh
+
+      ## What to check
+
+      1. The script's exit code is 0 and stdout reads
+         "PASS — all voxel checks green".
+      2. If it FAILS, the assertion lines name the colliding (signal pair,
+         x, y). Each collision is one of the seven failure modes documented
+         in `.deepwork/jobs/printable_pcb/job.yml` under "Known failure
+         modes":
+           - trunk-through-foreign-pin
+           - same-layer-parallel
+           - via-in-pocket
+           - edge-escape-impossible
+           - L2-channel-inside-pocket (board contact)
+           - bus-return-blocked-by-power-corridor-stubs
+           - sub-printable wall thickness (channels and pin rows < 0.6 mm
+             apart in CAD print as one merged void)
+
+      ## Output Format
+
+      - PASS: voxel test green, list the substrate classes covered by
+        the parameterized fixture (Tier1Substrate, Tier2Substrate,
+        Tier2SubstrateBundled).
+      - FAIL: paste the assertion lines verbatim and identify which of
+        the seven known failure modes each collision falls under.

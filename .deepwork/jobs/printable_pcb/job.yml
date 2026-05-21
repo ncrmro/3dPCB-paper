@@ -52,12 +52,17 @@ step_arguments:
           section (1). If no sibling exists, section (1) explicitly says so.
 
         - Risks-to-validate explicit failure modes: section (8) MUST explicitly
-          enumerate each of the four known failure modes from
+          enumerate each of the seven known failure modes from
           common_job_info_provided_to_all_steps_at_runtime that applies to this
           board (trunk-through-foreign-pin, same-layer parallel, via-in-pocket,
-          edge-of-board escape impossible) — either listing a specific instance
-          to check OR stating why the failure mode cannot apply to this board
-          (e.g., "single-layer plan, so via-in-pocket cannot occur").
+          edge-of-board escape impossible, L2-channel-inside-pocket / board
+          contact, bus-return-blocked-by-power-corridor-stubs, sub-printable
+          wall thickness) — either listing a specific instance to check OR
+          stating why the failure mode cannot apply to this board (e.g.,
+          "single-layer plan, so via-in-pocket cannot occur"; "no bus signals,
+          so bus-return-blocked cannot occur"; "all channels and pin rows
+          are spaced ≥ 0.6 mm apart, so sub-printable wall thickness cannot
+          occur").
 
         - Open questions discipline: any unspecified parameter that the draft
           defaulted (clearances, layer counts, hole diameters, etc.) MUST be
@@ -142,6 +147,71 @@ workflows:
       4. **Edge-of-board escape impossible**: a module placed in the middle of
          the substrate may have inner-column pins with no straight-line
          escape path; either move the module to the edge or change layers.
+      5. **L2-channel-inside-pocket (board contact)**: L2 channels are cut
+         from the substrate top into the same z-band where module PCBs sit
+         in pocket cavities (z ∈ [+0.7, +1.5]). An L2 segment whose xy lies
+         inside a module's PCB footprint shorts the copper wire into the
+         module board. Avoid by routing L2 only through clear-substrate xy
+         columns (gaps between pocket footprints) or stay on L1 below the
+         pocket cavity. Pin through-holes ARE allowed inside pocket xy —
+         they cut through the PCB at the pin location; only the wire CHANNEL
+         must avoid pocket xy on L2.
+      6. **Bus-return blocked by power-corridor north stubs**: when the
+         substrate has VCC and GND L1 east legs both within ~2 mm of the
+         sensor pin row (e.g. VCC at y=-16, GND at y=-19, pins at y=-17),
+         the available L1 east-west bands between pin row and either power
+         corridor are too narrow (~0.3 mm channel-clearance) to accommodate
+         a bus signal's L1 return. Additionally, each power-signal sensor
+         pin gets a vertical L1 stub from its corridor to the pin row,
+         spanning the entire y∈[corridor_y, pin_y] band at that x column.
+         These stubs intersect any bus L1 east-west run at the GND/VCC pin
+         columns. Resolving requires either (a) restructuring VCC and GND
+         to both sit on the same side of the pin row, (b) routing bus stubs
+         through OLED-style return holes that bypass the power corridors
+         via a dedicated through-hole, or (c) deferring sensor-side bus
+         extensions and terminating at OLED only.
+      7. **Sub-printable wall thickness between features**: two features
+         (channel-to-channel, channel-to-pin-hole, channel-to-pocket,
+         pin-to-pin) that don't overlap in CAD can still print as a merged
+         void if the substrate wall between them is below the FDM
+         printable floor. On the validation hardware (0.4 mm-nozzle FDM,
+         PLA, default Bambu Studio settings) over-extrusion at recess
+         transitions reaches +0.43 mm — see `docs/fdm_tolerance_notes.md`.
+         Working assumption: minimum printable wall thickness is **0.6 mm**
+         (channels designed any closer than that print as one merged
+         channel). Example currently in-tree: VCC's L1 east leg at y=-16
+         and the sensor pin row at y=-17. Channel south edge sits at
+         y=-16.4; pin hole north edge at y=-16.5. The CAD wall between
+         them is 0.1 mm — well below the printable floor; the printed
+         part will have no wall at all between the VCC channel and the
+         sensor pin holes at every VCC sensor pin column.
+
+      ## Mechanical voxel-test gate
+
+      A geometric voxel test exists at `code/cad/tests/test_substrate_routing.py`
+      that rasterizes every channel and through-hole at 0.1 mm resolution
+      and flags any voxel claimed by two different signals (or a wire vs. a
+      foreign owner). It covers all seven failure modes when the wall-
+      thickness buffer is enabled (see `_WALL_BUFFER` in the test —
+      currently defaults to half of `min_wall_thickness = 0.6 mm`,
+      i.e. 0.3 mm dilation per feature). Same-signal overlap stays
+      allowed (a wire entering its own pin hole is the design intent);
+      different-signal features must keep at least `min_wall_thickness`
+      of clear substrate between them.
+
+      When the plan has been materialized into substrate.py code (i.e. the
+      plan's per-net YAML blocks have been translated into `_get_signal_paths`
+      output for some substrate class), check_routing SHOULD run the test
+      and use its assertion output as authoritative:
+
+          .deepwork/jobs/printable_pcb/scripts/run_voxel_check.sh
+
+      The test output names the colliding signal pair and gives the (x, y)
+      of the first conflicting voxel, which feeds directly into the
+      remediation section of routing_check.md. Wall-thickness collisions
+      report as ordinary "path X collides with hole Y" lines — the
+      remediation is to widen the corridor y or shift the pin row away
+      from the channel, not just nudge the wire.
 
       ## Output convention
 
@@ -264,6 +334,28 @@ workflows:
           printable_pcb/<board_name>/routing_check.md.
 
           Do NOT modify the plan in this step. Diagnose only.
+
+          ## Voxel-test shortcut (when substrate.py has been materialized)
+
+          If this plan has been translated into a substrate class in
+          `code/cad/src/vitamins/substrate.py` (look for a new
+          `Tier{N}Substrate*` class referencing this board's net list), run
+          the voxel test FIRST and use its output as authoritative:
+
+              .deepwork/jobs/printable_pcb/scripts/run_voxel_check.sh <SubstrateClassName>
+
+          The script's stdout is either "PASS — all voxel checks green" or
+          a list of "path 'X' L<n> collides with ..." lines naming the
+          signal pair and the (x, y) of the first conflicting voxel. Copy
+          the failure lines verbatim into a "Voxel-test output" subsection
+          of routing_check.md before doing per-net enumeration — they
+          name colliding (signal, x, y) tuples that the per-net analysis
+          MUST then trace back to specific segments.
+
+          If the test PASSES, the per-net enumeration below is still
+          required (the test covers geometry but the report serves as
+          human-readable documentation of WHY each net is collision-free,
+          including the layer and rationale for any non-obvious routing).
 
           ## Source of truth
 
