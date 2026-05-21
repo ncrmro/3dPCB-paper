@@ -903,11 +903,19 @@ class Tier1Substrate(ad.CompositeShape):
         Subclasses can replace this hook to swap in a different topology
         without re-implementing all of `build()`. `Tier2SubstrateBundled`
         overrides this to emit the bundled-bus topology.
+
+        Orthogonal paths are post-processed through
+        `voxel_suggester.apply_chamfers` to replace any safe axis-
+        aligned L-bend with a 45° diagonal — the chamfer is only
+        applied when the diagonal still satisfies the printable wall
+        buffer (failure mode #7) against all other features.
         """
         paths: List[SignalPath] = []
         for net in self._routed_nets().values():
             paths.extend(_build_paths_for_net(net))
-        return paths
+        # Lazy import to avoid a substrate ↔ voxel_suggester import cycle.
+        from voxel_suggester import apply_chamfers
+        return apply_chamfers(self, paths)
 
     def _add_extra_solids(self, shape, d: Tier1SubstrateDimensions) -> None:
         """Hook for subclasses to add raised features (pedestals,
@@ -1270,10 +1278,12 @@ class Tier2SubstrateBundled(Tier2Substrate):
 
     def _get_signal_paths(self) -> List[SignalPath]:
         from netlist import TIER2_NETS
-        return (
+        paths = (
             _build_oled_only_power_paths(TIER2_NETS)
             + _build_bus_signal_paths(TIER2_NETS)
         )
+        from voxel_suggester import apply_chamfers
+        return apply_chamfers(self, paths)
 
     def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
         from netlist import TIER2_NETS
