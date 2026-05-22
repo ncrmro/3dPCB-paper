@@ -1,0 +1,68 @@
+# DeepSchema for substrate_plan.md emitted by the printable_pcb job's
+# single_plan workflow. Validates that every substrate plan carries
+# the audit trail required for downstream gates and reviewers — most
+# importantly the **Net merge audit** section produced by the
+# `optimize_net_sharing` step, which would otherwise be silently
+# dropped if the step is skipped.
+#
+# Created via deepwork_jobs/learn on 2026-05-20 after the
+# `optimize_net_sharing` step was added to the workflow.
+
+name: printable_pcb_substrate_plan
+summary: >
+  Every printable_pcb substrate plan MUST carry the nine required
+  sections, the inline YAML routing blocks per multi-endpoint net,
+  AND the Net merge audit produced by the optimize_net_sharing step.
+
+matchers:
+  - "printable_pcb/*/substrate_plan.md"
+
+requirements:
+  section_completeness: |
+    The file MUST contain all nine sections from the draft_plan
+    instructions in order: (1) Board identity, (2) Modules, (3) Net
+    list, (4) Pocket layout, (5) Through-hole list, (6) Per-net
+    routing, (7) Layer rationale, (8) Risks-to-validate, (9) Open
+    questions.
+
+  yaml_routing_blocks: |
+    Every multi-endpoint net in section 3 (Net list) MUST have a
+    fenced ```yaml ... ``` block under section 6 (Per-net routing)
+    with `net`, `segments`, and (optional) `vias` keys. Coordinates
+    in the YAML block MUST agree numerically with the prose
+    subsection for the same net. Singleton nets MAY omit the YAML
+    block.
+
+  net_merge_audit_present: |
+    The file MUST contain a final "Net merge audit" section AFTER
+    section 9 (Open questions). The audit lists every net-merge
+    opportunity the optimize_net_sharing step considered, its
+    disposition (accepted / declined), and where measurable the
+    slicer-derived Δtime / Δfilament. If no opportunities were
+    found the audit section contains a single line:
+    "No net-merge optimizations proposed."
+
+  bus_signals_not_merged: |
+    The Net merge audit section MUST NOT contain merge entries for
+    SDA or SCL. I²C is already multi-drop; merging the bus breaks
+    the corridor topology model. GND and (with caution) VCC are
+    the only eligible signals.
+
+  auto_mode_merges_annotated: |
+    For every accepted merge listed in the Net merge audit, the
+    file MUST record whether the merge was approved interactively
+    ("merged per user") or applied automatically ("merged in auto
+    mode"). Silent auto-merges are a process failure.
+
+instructions: |
+  The plan file is consumed by two downstream actors: the
+  `check_routing` step (which gates the design on collision
+  freeness) and a future code-generation step (which translates the
+  routing YAML into substrate.py geometry). Both treat the plan as
+  ground truth. Any section the plan omits — particularly the Net
+  merge audit — silently degrades the gate or skips an optimisation.
+
+  When validating a plan against this schema, prefer concrete
+  citations: quote the missing section header or the offending YAML
+  block. The plan is human-authored; specific feedback is much more
+  actionable than "section missing".

@@ -68,6 +68,33 @@ step_arguments:
           defaulted (clearances, layer counts, hole diameters, etc.) MUST be
           listed under (9) Open questions, not silently chosen.
 
+  - name: optimize_net_sharing_summary.md
+    description: "Reviewer communication channel for the optimize_net_sharing step. Records the mode used (interactive vs autonomous), slicer availability, every proposal considered with its disposition + wire/Δtime/Δfilament numbers, and references back to the Net merge audit section in substrate_plan.md."
+    type: file_path
+    review:
+      strategy: individual
+      instructions: |
+        Read optimize_net_sharing_summary.md and verify it accurately reports the
+        step's work. The summary is the channel through which a downstream
+        reviewer (who lacks transcript access) audits the step.
+
+        Evaluate against these criteria:
+        - Mode declaration present: file states either `interactive` (user
+          answered each AskUserQuestion) or `autonomous` (auto-default TRUE).
+        - Slicer status present: file states either `available` (with slicer
+          name + version) or `unavailable` (with reason). If `unavailable`,
+          per-proposal Δtime / Δfilament rows MUST say "skipped" rather than
+          a number.
+        - Per-proposal table: every proposal the step considered appears with
+          {signal, participants, wire-saved-mm, Δtime, Δfilament, disposition}.
+        - Bus-signal hygiene: no row proposes merging SDA or SCL. If one
+          appears, it is itself a process failure.
+        - Cross-reference: file links back to the "Net merge audit" section in
+          substrate_plan.md so a reviewer can verify the recorded outcomes
+          match the plan rewrite.
+        - Auto-mode discipline: when mode is `autonomous`, every accepted row
+          is annotated "merged in auto mode" (or equivalent) — never silent.
+
   - name: routing_check.md
     description: "Per-net validation report. Enumerates each trunk segment and lists collisions (foreign pin, same-layer crossing, pocket overlap, edge escape). Honest verdict — overall PASS only if every per-net verdict is PASS."
     type: file_path
@@ -333,6 +360,161 @@ workflows:
         outputs:
           substrate_plan.md:
             required: true
+
+      - name: optimize_net_sharing
+        instructions: |
+          Look for net-merge optimization opportunities in
+          substrate_plan.md before the design is gated by
+          check_routing.
+
+          The prototypical case is **vertical stacking**: when one
+          device's PCB cantilevers OVER another device's xy footprint
+          (e.g. the Tier 2 OLED cantilevers over the SCD41), the
+          two devices' GND pins are physically close in 3D. Routing
+          them as one merged wire — a single trunk that visits both
+          pins via a short local jumper — saves wire length and
+          eliminates a corridor branch. Same idea applies to
+          adjacent (non-stacked) devices that happen to be close in
+          xy.
+
+          ## Eligibility
+
+          - **GND**: always a candidate when two devices are
+            stacked or close. Multi-stop Y-shaped routing is fine
+            for ground; the only loss is shared impedance, which
+            is negligible at I²C speeds.
+          - **VCC**: candidate, but propose with a note about
+            shared-rail droop. The user can decline if the merged
+            net carries enough current to matter.
+          - **Bus signals (SDA / SCL)**: **NOT** candidates. I²C
+            is multi-drop by design; the existing trunk topology
+            already handles that. Don't propose merging the bus.
+          - **ADDR / NC / unused-pin singleton nets**: not candidates
+            (no shared trunk to merge with).
+
+          ## Process
+
+          1. Read the Pocket Layout (section 4) and the Modules table
+             (section 2) of `substrate_plan.md`. Identify each device's
+             PCB xy footprint, distinguishing the substrate-side
+             pocket from any cantilever extension.
+          2. For each pair of devices whose footprints overlap or
+             are adjacent (footprint centres < 30 mm apart, say),
+             enumerate the eligible shared signals (GND, possibly
+             VCC) per the rules above.
+          3. For each eligible signal, construct the merge topology
+             and compute the wire-length saving vs the existing
+             plan: the merged trunk visits one of the two devices'
+             pins first, then jumps to the other via a short local
+             channel; the trunk on the master side now branches off
+             one of the devices instead of two.
+          4. For each proposal, **ask the user structured questions**
+             via the `AskUserQuestion` tool, one question per
+             proposal (or `multiSelect: true` if there are several
+             candidates simultaneously). Prompt format:
+             ```
+             Combine [signal] route between [dev_a].[pin_a] and
+             [dev_b].[pin_b]?
+             - Wire saved:     ~N mm
+             - Print time Δ:   ~ΔT min (from bin/slicer-estimate)
+             - Filament Δ:     ~Δm g
+             Default: yes.
+             ```
+
+          ## Print-time tracking (slicer-driven)
+
+          Wire-length saved is a proxy. The actual cost the user
+          cares about is **FDM print time + filament consumed**, so
+          for each proposal also estimate the print-time and
+          filament deltas:
+
+          - Render an "un-merged" tier2_substrate.stl from the
+            current `substrate_plan.md`.
+          - Apply the proposed merge in a scratch copy of the plan,
+            render the "merged" tier2_substrate.stl.
+          - Pipe both STLs through `code/cad/bin/slicer-estimate`
+            (a thin wrapper around the user's slicer CLI — e.g.
+            PrusaSlicer's `--slice --info` or Bambu Studio's
+            equivalent). Extract `estimated_print_time` and
+            `filament_used` from each.
+          - Report `delta_time` = merged − un-merged (negative =
+            merge saves time) and `delta_filament` likewise.
+
+          If `bin/slicer-estimate` is not installed in the current
+          dev shell, skip the print-time deltas and proceed with
+          wire-length only; record the skip in the step summary
+          (see below) so a future re-run with the slicer wired up
+          can fill in the missing data.
+
+          ## Auto-mode default
+
+          When the workflow is invoked without an interactive user
+          available (the agent is running autonomously, or the
+          `AskUserQuestion` tool is not callable in the current
+          session), accept ALL proposed merges by default. Record
+          each accepted merge in the plan output AND in the step
+          summary so a future reviewer can audit which merges were
+          applied automatically vs explicitly approved.
+
+          ## Apply the merges
+
+          5. Rewrite `substrate_plan.md` in place with the merged
+             routing. For each merged net:
+             - Update the per-net routing YAML block to reflect the
+               new trunk topology (one master-side leg, plus the
+               short device-to-device jumper).
+             - Add a `merged_with:` key to the YAML block naming the
+               other participants — e.g. `merged_with: [OLED.GND,
+               SCD41.GND]`.
+             - Add a one-line note above the YAML block recording
+               the merge, whether it was user-approved or
+               auto-accepted ("merged in auto mode" /
+               "merged per user"), and the slicer Δtime / Δfilament
+               if measured.
+          6. Append a **"Net merge audit"** section to the end of
+             `substrate_plan.md` (after the existing "Open
+             questions" section) listing every proposal considered,
+             its disposition (accepted / declined), and the deltas.
+             If no opportunities were found, the audit section
+             contains a single line: "No net-merge optimizations
+             proposed."
+
+          ## Step summary (reviewer communication channel)
+
+          7. Write `.deepwork/tmp/optimize_net_sharing_summary.md`
+             with:
+             - Mode used: `interactive` (user answered each
+               AskUserQuestion) vs `autonomous` (auto-default
+               TRUE applied to all proposals).
+             - Slicer status: `available` (with the slicer name +
+               version) vs `unavailable` (skipped).
+             - Per-proposal record: signal, participants,
+               wire-saved, Δtime, Δfilament, disposition.
+             - Reference back to the "Net merge audit" section in
+               substrate_plan.md.
+
+             This file is the channel through which the quality
+             reviewer (who lacks transcript access) verifies that
+             auto-mode merges were recorded and bus signals weren't
+             proposed.
+
+          The next step (`check_routing`) consumes the updated
+          `substrate_plan.md` as its single source of truth, so
+          collisions on the merged geometry are caught by the
+          existing gate without further changes.
+        inputs:
+          substrate_plan.md:
+            required: true
+        outputs:
+          substrate_plan.md:
+            required: true
+          optimize_net_sharing_summary.md:
+            required: true
+        process_requirements:
+          "Bus signals are NOT merged": "SDA and SCL MUST NOT be proposed for merging. I²C multi-drop handles those natively; merging breaks the corridor model."
+          "Auto-mode merges recorded": "Any merge applied in auto mode (no user available) MUST be annotated in the plan with `merged in auto mode` so the choice is auditable. Silent auto-merges are a process failure."
+          "Wire savings reported": "Each proposed merge MUST include an estimated wire-length saving (mm). A merge with zero or negative savings MUST NOT be proposed."
+          "Print-time deltas attempted": "Each proposed merge MUST include a slicer-derived Δtime + Δfilament estimate, OR an explicit note in the step summary that bin/slicer-estimate was unavailable and the deltas were skipped. Silently dropping the slicer pass is a process failure."
 
       - name: check_routing
         instructions: |
