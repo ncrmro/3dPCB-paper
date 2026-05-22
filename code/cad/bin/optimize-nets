@@ -1,0 +1,6 @@
+#!/usr/bin/env bash
+# Static net-sharing optimizer — see code/cad/src/optimizer/__init__.py.
+set -euo pipefail
+CAD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec uv --project "$CAD_DIR" run env PYTHONPATH="$CAD_DIR/src" \
+    python -m optimizer.cli "$@"

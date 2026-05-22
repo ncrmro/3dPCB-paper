@@ -1,0 +1,64 @@
+# Default weights for the static net-sharing optimizer.
+#
+# Class-based: signals are typed by electrical role, not name. Override
+# any of the defaults below per-bus or per-device. Commented-out blocks
+# show how SPI / UART / CAN would attach to the same grammar — those
+# classes parse but emit `not_yet_implemented` warnings until the
+# runtime grows support.
+
+signal_classes:
+  power_rail:        { mergeable: "true",        droop_warning: true  }
+  ground:            { mergeable: "true",        droop_warning: false }
+  bus_broadcast:     { mergeable: "conditional", reason_when_declined: bus_signal_in_per_signal_topology }
+  bus_addressed:     { mergeable: "false",       reason: per_device_unique }
+  point_to_point:    { mergeable: "false",       reason: two_endpoint_net }
+  differential_pair: { mergeable: "as_pair",     reason_when_declined: pair_atomic }
+  length_matched:    { mergeable: "false",       reason: length_match_required }
+  singleton:         { mergeable: "false",       reason: no_shared_trunk }
+
+buses:
+  primary_i2c:
+    class: bus_broadcast
+    signals: [sda, scl]
+    power_signals: [vcc, gnd]
+    topology: per_signal
+    max_total_stub_capacitance_pf: 400
+    visit_order_constraints: { start: ESP32 }
+
+  # Grammar-only examples (uncomment to exercise — runtime emits
+  # `not_yet_implemented` for non-broadcast classes):
+  #
+  # display_spi:
+  #   class: bus_broadcast
+  #   signals: [sck, mosi, miso]
+  #   per_device_singletons: [cs]
+  #   topology: per_signal
+  #
+  # debug_uart:
+  #   class: point_to_point
+  #   endpoints: [ESP32.U0_TX, FTDI.RX]
+  #
+  # main_can:
+  #   class: differential_pair
+  #   pair: [can_h, can_l]
+  #   topology: bundled
+  #   termination: { value_ohm: 120, at: [start, end] }
+
+wire_cost_per_mm:
+  power_rail: 2.0
+  ground: 2.0
+  bus_broadcast: 1.0
+  point_to_point: 1.0
+  default: 1.0
+
+via_cost: 3.0
+jumper_collision_penalty: 50.0
+
+proximity:
+  max_centre_to_centre_mm: 30.0
+  stack_overlap_required: false
+
+metrics:
+  distance: manhattan
+
+per_device_overrides: {}
