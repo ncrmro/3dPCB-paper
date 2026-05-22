@@ -8,11 +8,14 @@ from netlist import I2cSignal, Pin
 
 
 # SCD41 breakout (Adafruit STEMMA QT 5190) — 4-pin header J2,
-# silkscreen "VCC GND SCL SDA" L→R from pin 1.
-# Source: Adafruit product page + audit doc.
+# silkscreen "GND VCC SCL SDA" L→R from pin 1 on the physical
+# board in hand (2026-05-19 inspection — supersedes the earlier
+# "VCC GND" assumption from the product page diagram, which lists
+# the rails in the OTHER orientation).
+# Source: physical inspection + audit doc.
 SCD41_PINOUT: dict[int, Pin] = {
-    1: Pin("J2", 1, signal=I2cSignal.VCC),
-    2: Pin("J2", 2, signal=I2cSignal.GND),
+    1: Pin("J2", 1, signal=I2cSignal.GND),
+    2: Pin("J2", 2, signal=I2cSignal.VCC),
     3: Pin("J2", 3, signal=I2cSignal.SCL),
     4: Pin("J2", 4, signal=I2cSignal.SDA),
 }

@@ -248,10 +248,12 @@ def _module_pocket_bboxes(
 ) -> dict[str, tuple[float, float, float, float]]:
     """Pocket footprints in board-local (x, y) coords, matching the
     geometry built inside Tier1Substrate.build()."""
+    esp_pin_span_x = _J1B_X - _J1A_X
+    esp_pin_span_y = 8 * _PITCH
     esp_cx = (_J1A_X + _J1B_X) / 2
-    esp_cy = _J1A_Y + 4 * _PITCH
-    esp_w = dim.esp32.width + dim.pocket_clearance
-    esp_h = dim.esp32.length + dim.pocket_clearance
+    esp_cy = _J1A_Y + esp_pin_span_y / 2
+    esp_w = esp_pin_span_x + 2 * dim.esp32_pin_pocket_clearance + dim.pocket_clearance
+    esp_h = esp_pin_span_y + 2 * dim.esp32_pin_pocket_clearance + dim.pocket_clearance
 
     scd_cx = _J2_X + 1.5 * _PITCH
     scd_cy = _J2_Y + dim.scd41.depth / 2 - dim.scd41.header_body_width / 2

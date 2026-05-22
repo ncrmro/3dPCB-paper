@@ -21,13 +21,24 @@ Date of audit: **2026-05-18**. Auditor: Nicholas Romero.
   rows). Sourced from `mrtnvgr/esp32_supermini` 3D model.
 - **Vitamin class**: `Esp32C3SuperminiDimensions`
   (`vitamins/esp32.py`).
-- **Reference orientation**: USB-C connector facing **+Y** (north),
-  J1A on the −X side (left column), J1B on the +X side (right
-  column) when viewed from above with silkscreen visible.
-- **Pin-1 marker**: on most clones, pin 1 of each row is **closest
-  to the USB-C end** (the +Y end of the column). The SuperMini
-  README and `code/kicad/gen_spike_pcb.py:29-32` both agree: pins
-  run "top to bottom" 1 → 9 with pin 1 at the USB-C end.
+- **Reference orientation**: USB-C connector facing **−Y** (south
+  on the substrate), J1A on the −X side (west / "left" column),
+  J1B on the +X side (east / "right" column) when viewed from
+  above with the silkscreen visible. The board is component-side
+  up. This orientation is what makes J1A the power column
+  (+5V/GND/+3V3) on the substrate: per the plant-caravan SuperMini
+  ASCII pinout (the authoritative source, at
+  `~/repos/ncrmro/plant-caravan/hardware/docs/ESP32-C3-SuperMini.md`),
+  the power column sits opposite the USB-C-relative-right side, so
+  USB-C-south + component-up places power on the substrate's west.
+  Earlier audit revisions declared USB-C facing +Y — that was
+  inconsistent with the recorded J1A=power PINOUT and was caught
+  by a "GND is second from back-left" inspection of the rendered
+  substrate.
+- **Pin-1 marker**: pin 1 of each row is **closest to the USB-C
+  end** (the −Y end of the column on this substrate). The
+  SuperMini README and `code/kicad/gen_spike_pcb.py:29-32` both
+  agree: pins run 1 → 9 with pin 1 at the USB-C end.
 - **Source / authority**:
   - `data/models/esp32_c3_supermini/ATTRIBUTION.md` →
     `mrtnvgr/esp32_supermini` README (commit pinned in
@@ -47,19 +58,23 @@ Date of audit: **2026-05-18**. Auditor: Nicholas Romero.
 - **Vitamin class**: `Scd41Dimensions` (`vitamins/sensors.py`).
 - **Reference orientation**: 4-pin header J2 on the long edge of
   the board; silkscreen labels visible adjacent to each pad.
-- **Pin-1 marker**: silkscreen reads
-  **"VIN · GND · SCL · SDA"** L→R from the labelled "VIN" pad
-  (Adafruit product page diagram, schematic PDF). The substrate
-  treats `VIN` as `VCC` (+3V3 from the regulator on the SuperMini).
+- **Pin-1 marker**: silkscreen on the physical breakout in hand
+  reads **"GND · VIN · SCL · SDA"** L→R (confirmed 2026-05-19 by
+  inspection of the populated unit). Earlier versions of this
+  audit recorded `VIN · GND` from the Adafruit product-page
+  diagram; the physical board's silkscreen runs the rails in the
+  opposite order. The substrate treats `VIN` as `VCC` (+3V3 from
+  the regulator on the SuperMini).
 - **Source / authority**:
-  - Adafruit product page: `adafruit.com/product/5190`
-  - Adafruit STEMMA QT family pinout convention (VIN, GND, SCL,
-    SDA) used across the Adafruit sensor library.
+  - Physical board silkscreen (Adafruit 5190, ordered 2026-05).
+  - Adafruit product page: `adafruit.com/product/5190` — note
+    the on-page diagram showed the rails in the reversed
+    orientation relative to the silkscreen on the unit shipped.
 - **PINOUT** (recorded in `vitamins/sensors_pinout.py`):
-  - J2: `[VCC, GND, SCL, SDA]`
-- **Mismatch flags**: none. (VIN is treated as VCC; the +3V3 rail
-  the SuperMini exposes is within the 3.3-5V VIN range listed on
-  the Adafruit page.)
+  - J2: `[GND, VCC, SCL, SDA]`
+- **Mismatch flags**: previous version of the PINOUT had pin 1 =
+  VCC, pin 2 = GND from the product-page diagram. Corrected
+  2026-05-19 after physical-board silkscreen audit.
 
 ## BH1750 — GY-302
 

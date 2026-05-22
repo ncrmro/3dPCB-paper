@@ -26,7 +26,7 @@ class Esp32C3SuperminiDimensions:
 
     width: float = 18.0  # mm — user measured
     length: float = 22.5  # mm — user measured
-    pcb_thickness: float = 0.8  # mm — user measured
+    pcb_thickness: float = 1.5  # mm — user measured on the variant in hand
     pin_pitch: float = 2.54  # mm — standard header pitch
     pin_rows: int = 2  # rows of pins (left and right)
     pins_per_row: int = 8  # pins per side

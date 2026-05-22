@@ -82,13 +82,35 @@ class SignalPath:
 # Substrate geometry constants
 # ---------------------------------------------------------------------------
 
-_BOARD_W = 80.0
+# Board outline trimmed to the populated bbox + small margins.
+#   x: ESP32 pocket west at -31.5, BH1750 pocket east at +32.08 →
+#      width 68 (edges ±34) leaves 2.5 mm margin west, 1.92 mm east.
+#   y: held at 50. There is excess material on the yp side (~9.6 mm
+#      past the SDA L2 corridor at y=+15) but trimming it requires
+#      either (a) shifting the plate via post-translate, which
+#      cascades a frame shift through every subsequent add_at and
+#      detaches the OLED pedestal from the plate; or (b) building
+#      the plate as a `.solid()` + a `.hole()` of the excess at the
+#      end of build(). Approach (b) is the right one but needs a
+#      careful walk through every other shape's frame to make sure
+#      the hole subtracts from EVERYTHING that should be trimmed
+#      and NOTHING that shouldn't (pedestal at y∈[-24,-20] safe,
+#      bump at y=0 safe, channels and pin holes south of +17 safe).
+#      Deferred.
+_BOARD_W = 68.0
 _BOARD_H = 50.0
 _THICKNESS = 3.0
 _PITCH = 2.54
 _HOLE_D = 1.0  # matches KiCad pad drill in gen_spike_pcb.py:272
 
-_J1A_X, _J1A_Y = -30.0, -17.0  # ESP32 left col, pin 1
+# J1A/J1B: pin 1 is at the ESP32-C3 SuperMini USB-C end (silkscreen
+# convention). Pin 1 anchors at the SOUTH end of the substrate
+# because the ESP32 is installed with USB-C facing -Y (south) on
+# this board — that puts the power column (5V/GND/3V3) on the
+# substrate's WEST side (J1A, x=-30) per the plant-caravan
+# SuperMini ASCII pinout. See netlist_audit.md for the verified
+# orientation.
+_J1A_X, _J1A_Y = -30.0, -17.0  # ESP32 left col, pin 1 (USB-C end, south)
 _J1B_X = _J1A_X + 17.78
 _J1B_Y = _J1A_Y
 _J2_X, _J2_Y = 5.0, -17.0  # SCD41 pad 1 (rotated so pads run +X)
@@ -958,6 +980,15 @@ class Tier1SubstrateDimensions:
     # each void by `min_wall_thickness / 2` and flags inflated overlaps
     # between different signals as a wall-thickness failure.
     min_wall_thickness: float = 0.6
+    # Clearance from the OUTERMOST ESP32 pin through-hole to the
+    # nearest pocket wall, measured pin-centre to wall. The default
+    # 1.5 mm matches the ESP32-C3 SuperMini's USB-C overhang: the
+    # first pin sits 1.5 mm clear of the back (south) wall and the
+    # outside (west/east) walls so each through-hole is a FULL
+    # circle inside the pocket bottom, not a half-circle bisected by
+    # the pocket wall. The wire can poke through and be soldered to
+    # the full disk of exposed copper at the pocket floor.
+    esp32_pin_pocket_clearance: float = 1.5
     # Receptacle hole diameter for OLED male DuPont pin (~0.64 mm pin).
     # Smaller than `hole_diameter` so the printed plastic grips by
     # interference fit.
@@ -972,30 +1003,34 @@ class Tier1SubstrateDimensions:
     receptacle_diameter: float = 1.25
 
     # OLED mounting features (Tier 2 only). The OLED PCB cantilevers
-    # north from the receptacles in J4 and would otherwise rest at
-    # z ≈ +5.5 mm — well below the SCD41 sensor IC top at z ≈ +7.65
-    # mm (measured: 9.15 mm from substrate back to CO2 sensor top).
-    # The pedestal lifts the OLED's header plastic body (and the OLED
-    # PCB above it) high enough to clear the SCD41 with margin; the
-    # support bump props up the cantilevered north end of the OLED
-    # PCB so it stays level.
+    # off the receptacles in J4 and would otherwise rest directly on
+    # the substrate. The pedestal lifts the OLED's header plastic
+    # body (and the OLED PCB above it) clear of the substrate top;
+    # the support bump props up the cantilevered far end of the
+    # OLED PCB so it stays level.
     #
     # Geometry budget (substrate-back z=-1.5, substrate-top z=+1.5):
-    #   pedestal top      = +1.5 + 5.0 = +6.5
-    #   header plastic    = +2.5
-    #   OLED PCB bottom   = +6.5 + 2.5 = +9.0   ← target ≥ SCD41 top
-    #   SCD41 sensor top  = +7.65 (measured)
-    #   clearance         = 1.35 mm
+    #   pedestal top      = +1.5 + 2.5 = +4.0
+    #   header plastic    = +2.5  (OLED's own plastic header guard)
+    #   OLED PCB bottom   = +4.0 + 2.5 = +6.5
     #
+    # The pedestal-height-5 mm value originally landed the OLED PCB
+    # at z=+9.0 (5 mm pedestal + 2.5 mm plastic header), but that
+    # double-counted the plastic header against the SCD41 clearance:
+    # the OLED PCB does not need to clear the SCD41 sensor IC top
+    # because the two don't overlap in xy after the layout that
+    # cantilevers the OLED off the south substrate edge. Pedestal
+    # height was reduced to 2.5 mm to sit the OLED at the correct
+    # working height — the plastic header alone covers the lift.
     oled_pedestal_width: float = 12.0   # x extent (covers 4 pins at 2.54)
     oled_pedestal_depth: float = 4.0    # y extent
-    oled_pedestal_height: float = 5.0   # z above substrate top
+    oled_pedestal_height: float = 2.5   # z above substrate top
 
-    # Support bump under the OLED PCB's north end (cantilever support).
-    # Height matches the pedestal so the OLED PCB sits level. xy chosen
-    # to clear the SCD41 sensor IC footprint (x ∈ [6.06, 11.56],
-    # y ∈ [-8.10, -2.60]) — bump centred at (0, 0) leaves it 6+ mm
-    # west of the SCD41 IC.
+    # Support bump under the OLED PCB's cantilevered end, sized to
+    # match the pedestal + plastic-header total so the OLED PCB sits
+    # level. xy chosen to clear the SCD41 sensor IC footprint
+    # (x ∈ [6.06, 11.56], y ∈ [-8.10, -2.60]) — bump centred at
+    # (0, 0) leaves it 6+ mm west of the SCD41 IC.
     oled_support_bump_width: float = 4.0
     oled_support_bump_depth: float = 4.0
     oled_support_bump_height: float = 5.0
@@ -1185,10 +1220,21 @@ class Tier1Substrate(ad.CompositeShape):
                 post=ad.translate([cx, cy, box_z]),
             )
 
+        # ESP32 pocket: sized to the pin column span + 2 × clearance,
+        # NOT to the ESP32 PCB's physical width/length. Pin columns are
+        # at the edge of the PCB (castellated), so a PCB-sized pocket
+        # would put each through-hole at the pocket wall — the hole
+        # cuts a half-circle through the wall and the wire emerges
+        # straddling the pocket boundary. Sizing the pocket from the
+        # pin extents leaves each hole fully inside the pocket floor.
+        esp_pin_span_x = _J1B_X - _J1A_X       # 17.78 mm (7 × pitch)
+        esp_pin_span_y = 8 * _PITCH            # 9 pins → 8 gaps = 20.32 mm
+        esp_pocket_w = esp_pin_span_x + 2 * d.esp32_pin_pocket_clearance
+        esp_pocket_l = esp_pin_span_y + 2 * d.esp32_pin_pocket_clearance
         esp_cx = (_J1A_X + _J1B_X) / 2
-        esp_cy = _J1A_Y + 4 * _PITCH
+        esp_cy = _J1A_Y + esp_pin_span_y / 2
         punch_pocket(esp_cx, esp_cy,
-                     d.esp32.width, d.esp32.length,
+                     esp_pocket_w, esp_pocket_l,
                      d.esp32.pcb_thickness, "pocket_esp32")
 
         scd_cx = _J2_X + 1.5 * _PITCH
