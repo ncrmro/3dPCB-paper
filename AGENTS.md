@@ -44,18 +44,43 @@ adopting it as a runtime dependency. The compiler owns its data model.
 
 ## Dev shell
 
-Each subproject with code has its own `flake.nix`. Enter via `nix develop`
-or rely on direnv. Never run installers the devshell already provides
-(e.g. no `playwright install`, no `pip install` outside `uv`).
+Default developer loop is a single `process-compose` invocation from
+the repo root. It starts the Astro gallery, stages GLBs once, and
+watches `code/cad/` and `code/kicad/` for source changes so the
+rendered `.glb`/`.stl` artefacts in `code/web/public/models/` stay
+in lockstep with the source. **Always boot this before editing CAD or
+KiCad files** — without it, the gallery artefacts drift out of date
+relative to the source and any "I changed the part, why does it still
+look like the old one" confusion follows.
 
 ```bash
-cd code/cad
-nix develop -c ./bin/render   # writes .scad files into code/cad/build/
+nix develop -c process-compose up
+```
+
+Processes wired up by `process-compose.yaml`:
+
+- **prebuild** — one-shot: stages GLBs into `code/web/public/models/`.
+- **web** — `astro dev` on a random high port (logged at start).
+- **watch-cad** — re-runs the AnchorSCAD render pipeline on `*.py`
+  changes under `code/cad/src/`.
+- **watch-kicad** — re-runs the KiCad render pipeline on
+  `*.kicad_pcb` / `*.kicad_sch` changes under `code/kicad/`.
+
+Each subproject also has its own `flake.nix` for direct use when the
+orchestrator is overkill (one-shot render, CI, debugging a single
+pipeline):
+
+```bash
+cd code/cad   && nix develop -c ./bin/render               # AnchorSCAD parts
+cd code/kicad && nix develop -c ./bin/render-board spike.kicad_pcb
+cd code/web   && nix develop -c bun install && nix develop -c bun run dev
 ```
 
 Python is 3.13, managed by `uv`. Dependencies: `anchorscad-core`,
 `pythonopenscad`, `numpy`. `cadeng` (gallery server) and a wrapped
-headless OpenSCAD come from the `cadeng` flake input.
+headless OpenSCAD come from the `cadeng` flake input. Never run
+installers the devshell already provides (no `playwright install`,
+no `pip install` outside `uv`).
 
 ## Conventions
 

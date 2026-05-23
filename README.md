@@ -29,36 +29,14 @@ See [`AGENTS.md`](AGENTS.md) for the contributor-facing detail
 
 ## Quick start
 
-The fastest path: a single `process-compose` invocation from the
-repo root starts the Astro dev server, stages models once, and
-watches `code/cad/` and `code/kicad/` for changes.
-
 ```bash
 nix develop -c process-compose up
 ```
 
-Processes wired up by `process-compose.yaml`:
-
-- **prebuild** — one-shot: stages GLBs into `code/web/public/models/`.
-- **web** — `astro dev` on a random high port (logged at start).
-- **watch-cad** — re-runs the AnchorSCAD render pipeline on `*.py`
-  changes under `code/cad/src/`.
-- **watch-kicad** — re-runs the KiCad render pipeline on
-  `*.kicad_pcb` / `*.kicad_sch` changes under `code/kicad/`.
-
-Each subproject also has its own `flake.nix` for direct use:
-
-```bash
-# AnchorSCAD substrate compiler
-cd code/cad && nix develop -c ./bin/render
-
-# KiCad — open the GUI or run the headless renderer
-cd code/kicad && nix develop
-cd code/kicad && nix develop -c ./bin/render-board spike.kicad_pcb
-
-# Astro gallery (without the watchers)
-cd code/web && nix develop -c bun install && nix develop -c bun run dev
-```
+Boots the Astro gallery, stages GLBs once, and watches `code/cad/`
+and `code/kicad/` for source changes. See
+[`AGENTS.md` § Dev shell](AGENTS.md#dev-shell) for the per-process
+breakdown and per-subproject `nix develop` fallbacks.
 
 Top-level workspaces:
 
