@@ -28,9 +28,12 @@ import pytest
 
 from vitamins.substrate import (
     Point2D,
+    SPEC_SUBSTRATES,
     Tier1Substrate,
     Tier2Substrate,
     Tier2SubstrateBundled,
+    Tier2SubstrateFromSpec,
+    Tier2SubstrateOption2,
     WireSegment,
     _pin_position,
 )
@@ -43,8 +46,21 @@ from voxel_grid import (
 )
 
 
+_BASE_SUBSTRATE_CLASSES = [
+    Tier1Substrate,
+    Tier2Substrate,
+    Tier2SubstrateBundled,
+    Tier2SubstrateOption2,
+    Tier2SubstrateFromSpec,
+]
+
+
 @pytest.fixture(
-    params=[Tier1Substrate, Tier2Substrate, Tier2SubstrateBundled],
+    # Auto-pickup: every entry in SPEC_SUBSTRATES (each YAML in
+    # `code/cad/specs/` becomes a class) runs against every routing
+    # invariant. Drop a new YAML in, new fixture cases appear here
+    # without any test-file edits.
+    params=_BASE_SUBSTRATE_CLASSES + list(SPEC_SUBSTRATES.values()),
     ids=lambda cls: cls.__name__,
 )
 def substrate(request):
@@ -206,6 +222,139 @@ def test_every_segment_is_45_or_90(substrate):
     assert not bad, (
         "Every WireSegment must run at 0°/±45°/±90°/±135°/±180° — "
         "no arbitrary slopes:\n" + "\n".join(bad)
+    )
+
+
+# Edge-clearance invariant: every routed channel must keep at least
+# `min_wall_thickness` of substrate between its outer boundary
+# (centre ± channel_width/2) and each board edge. This is the same
+# 0.6 mm FDM wall-floor that `test_no_voxel_overlap_between_signals`
+# enforces between any two signals — just applied to the board outline
+# as the "other feature". A clearance below the threshold means there
+# isn't enough plastic between the channel and the board face to print
+# reliably; below zero means the channel actually surfaces at the edge.
+
+
+# Tier2SubstrateBundled fails this check on SDA's east-edge climb
+# (channel boundary at x=+34.4 leaves -0.4 mm clearance to the +34
+# board edge — channel exits the substrate). The class is kept as the
+# "before" half of the route-scoring comparison against
+# Tier2SubstrateOption2, so the failure is xfailed here — option-2
+# is the fix.
+@pytest.fixture
+def _is_bundled_xfail(substrate, request):
+    if substrate.__class__.__name__ == "Tier2SubstrateBundled":
+        request.node.add_marker(
+            pytest.mark.xfail(
+                reason=(
+                    "Tier2SubstrateBundled has a known SDA edge-clearance "
+                    "violation at x=+34 — Tier2SubstrateOption2 is the fix"
+                ),
+                strict=True,
+            )
+        )
+
+
+def test_channel_distance_from_board_edge(substrate, _is_bundled_xfail):
+    """For every WireSegment, the perpendicular distance from the
+    channel's outer boundary to each board edge must be ≥
+    `dim.edge_clearance`. Same shape as the inter-signal clearance
+    rule (test_no_voxel_overlap_between_signals), with the board
+    outline as the "other feature". The default edge clearance
+    (one channel-width = 0.8 mm) is stricter than the wall floor
+    (0.6 mm) on purpose — an edge wall that thin would chip off."""
+    d = substrate.dim
+    half_w = d.board_w / 2.0
+    half_h = d.board_h / 2.0
+    channel_half = d.channel_width / 2.0
+    required = d.edge_clearance
+
+    bad: list[str] = []
+    for path in substrate._get_signal_paths():
+        for elem in path.elements:
+            if not isinstance(elem, WireSegment):
+                continue
+            x_min = min(elem.start.x, elem.end.x) - channel_half
+            x_max = max(elem.start.x, elem.end.x) + channel_half
+            y_min = min(elem.start.y, elem.end.y) - channel_half
+            y_max = max(elem.start.y, elem.end.y) + channel_half
+
+            # Signed clearance to each edge: positive = substrate remains
+            # between channel and edge; zero = channel boundary on edge;
+            # negative = channel exits the board.
+            clearances = (
+                ("east",  +half_w - x_max),
+                ("west",  x_min - (-half_w)),
+                ("north", +half_h - y_max),
+                ("south", y_min - (-half_h)),
+            )
+            for edge_name, clearance in clearances:
+                if clearance < required:
+                    bad.append(
+                        f"path {path.name!r} L{elem.layer}: "
+                        f"({elem.start.x:.3f}, {elem.start.y:.3f}) → "
+                        f"({elem.end.x:.3f}, {elem.end.y:.3f}) — "
+                        f"{edge_name} clearance {clearance:+.3f} mm "
+                        f"< required {required:.3f} mm "
+                        f"(short by {required - clearance:.3f} mm)"
+                    )
+    assert not bad, (
+        f"Every routed channel must keep ≥ {required:.3f} mm of substrate "
+        f"between its outer boundary and each board edge — same wall floor "
+        f"as the inter-signal clearance rule:\n" + "\n".join(bad)
+    )
+
+
+# Hole-to-hole clearance: every pair of drilled holes (pins + vias +
+# return-holes), regardless of signal, must keep ≥ min_wall_thickness
+# of substrate between their inflated boundaries. The inter-signal
+# voxel test exempts same-signal pairs (so a wire entering its own pin
+# is allowed), but printability doesn't care about electrical
+# semantics — a thin substrate wall between any two drilled cylinders
+# is equally likely to fail in the printer. This test catches "two
+# holes right next to each other" topology smells that the voxel test
+# silently allows.
+
+
+def test_hole_pair_wall_floor(substrate):
+    """For every pair of drilled holes, the perpendicular substrate
+    wall between their boundaries (centre distance minus sum of radii)
+    must be ≥ `dim.hole_pair_clearance`. Stricter than the inter-channel
+    wall floor because a thin pillar between two through-holes is the
+    weakest plastic feature on the board: handling, header insertion,
+    and wire seating all stress it. Catches same-signal hole pairs the
+    voxel test allows by design — those pairs are usually a topology
+    smell (redundant via, or piggybacking features that should merge)."""
+    d = substrate.dim
+    required = d.hole_pair_clearance
+    holes = substrate._drilled_hole_positions()
+
+    def _radius(name: str) -> float:
+        if name.startswith("J4."):
+            return d.receptacle_diameter / 2.0
+        if name.endswith("_via"):
+            return d.via_diameter / 2.0
+        return d.hole_diameter / 2.0
+
+    bad: list[str] = []
+    for i, (p1, n1) in enumerate(holes):
+        r1 = _radius(n1)
+        for j in range(i + 1, len(holes)):
+            p2, n2 = holes[j]
+            r2 = _radius(n2)
+            centre_dist = math.hypot(p1.x - p2.x, p1.y - p2.y)
+            wall = centre_dist - r1 - r2
+            if wall < required:
+                bad.append(
+                    f"holes {n1!r} ({p1.x:+.2f}, {p1.y:+.2f}) and "
+                    f"{n2!r} ({p2.x:+.2f}, {p2.y:+.2f}): "
+                    f"wall {wall:+.3f} mm < required {required:.3f} mm "
+                    f"(short by {required - wall:.3f} mm)"
+                )
+    assert not bad, (
+        f"Every hole pair must keep ≥ {required:.3f} mm of substrate "
+        f"between their boundaries — printability rule, applied to ALL "
+        f"pairs (same signal or not):\n" + "\n".join(bad)
     )
 
 

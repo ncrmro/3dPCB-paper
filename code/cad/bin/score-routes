@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Compare routed-substrate topologies by scoring their signal paths.
+# Lower aggregate is better. Score components and weights live in
+# `code/cad/src/router/score.py`.
+#
+# Usage:
+#   score-routes [SUBSTRATE_CLASS ...]
+#
+# With no args, scores every Tier2 substrate. With class names (e.g.
+# `tier2_substrate_bundled tier2_substrate_option2`) scores just those.
+set -euo pipefail
+CAD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec uv --project "$CAD_DIR" run env PYTHONPATH="$CAD_DIR/src" \
+    python -m router.cli_score "$@"

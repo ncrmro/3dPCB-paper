@@ -1,0 +1,188 @@
+# Declarative description of Tier2SubstrateOption2.
+#
+# Each route is authored as a list of single-layer `legs`; an `apply_chamfers`
+# pass on the spec-driven class converts every safe axis-aligned L-bend into
+# a 45° diagonal, matching the hand-coded class element-for-element.
+#
+# Coordinates are in millimetres; layers are 1 (substrate bottom, hidden) or
+# 2 (substrate top). Pin references in `pin_holes:` use the netlist's
+# Pin(ref, number) convention via the "REF.NUMBER" string form.
+
+name: tier2_option2
+
+# Board geometry comes from Tier1SubstrateDimensions defaults (68×50×3 mm).
+# Override scalars here when the v1 spec wants to deviate.
+dim: {}
+
+# Z-stack:
+#   level 0 = base plate (-1.5 .. +1.5)
+#   level 1 = OLED pedestal (+1.5 .. +4.0) over (0, +10)
+# v1 carves channels into the base plate via _cut_segment; the pedestal is
+# a stacked solid above the substrate top.
+levels:
+  - name: base
+    perimeter: { cx: 0.0, cy: 0.0, w: 68.0, h: 50.0 }
+    z_start: -1.5
+    z_end:   +1.5
+  - name: oled_pedestal
+    perimeter: { cx: 0.0, cy: 10.0, w: 12.0, h: 4.0 }
+    z_start:  +1.5
+    z_end:    +4.0
+
+# Devices and the pin through-holes they need. v1 reuses Tier2SubstrateOption2
+# for the hole/pocket geometry (the test target is route-topology parity);
+# the spec still lists the pin_holes so future v2 generators have the
+# data they need to drill them.
+devices:
+  - name: esp32
+    levels: [0]
+    pin_holes:
+      - J1A.5   # VCC master
+      - J1A.6   # GND master
+      - J1B.1   # SDA master
+      - J1B.2   # SCL master
+  - name: scd41
+    levels: [0]
+    pin_holes:
+      - J2.1
+      - J2.2
+      - J2.3
+      - J2.4
+  - name: bh1750
+    levels: [0]
+    pin_holes:
+      - J3.1
+      - J3.2
+      - J3.3
+      - J3.4
+      - J3.5
+  - name: oled
+    levels: [1]
+    pin_holes:
+      - J4.1
+      - J4.2
+      - J4.3
+      - J4.4
+
+# Per-signal route topology. Each leg is one single-layer waypoint list
+# fed through router.paths.waypoints_to_path; an apply_chamfers pass on
+# the result converts safe L-bends to 45° diagonals. Forks between legs
+# share their starting waypoint (e.g. SCL's bridge column legs both
+# start at (17, -20.6) — the trunk and the fork have the same xy).
+routes:
+
+  - signal: VCC
+    legs:
+      # Master → highway → OLED pin. L1 east escape inside ESP32 pocket,
+      # L1 north along x=-25, L1 east along the y=+12 highway, L1 south
+      # stub onto J4.2 at (-1.27, +10).
+      - [[-30.0,  -11.92, 1],
+         [-25.0,  -11.92, 1],
+         [-25.0,  +12.0,  1],
+         [ -1.27, +12.0,  1],
+         [ -1.27, +10.0,  1]]
+      # L2 stub south from the OLED pin to the return hole at y=+6.
+      - [[-1.27, +10.0, 2],
+         [-1.27,  +6.0, 2]]
+      # Return hole → SCD41 J2.1 via the L1 corridor at y=-15.3.
+      - [[ -1.27,  +6.0,   1],
+         [ -1.27, -15.3,   1],
+         [ +7.54, -15.3,   1],
+         [ +7.54, -17.0,   1]]
+      # Fork at (7.54, -15.3): east along the corridor to BH1750 J3.5.
+      - [[ +7.54, -15.3, 1],
+         [+30.16, -15.3, 1],
+         [+30.16, -17.0, 1]]
+
+  - signal: GND
+    legs:
+      # Master → highway → OLED pin. Same shape as VCC but routed via
+      # the y=+5 corridor instead of y=+12 (and -22 escape column).
+      - [[-30.0,  -14.46, 1],
+         [-22.0,  -14.46, 1],
+         [-22.0,   +5.0,  1],
+         [ -3.81,  +5.0,  1],
+         [ -3.81, +10.0,  1]]
+      - [[-3.81, +10.0, 2],
+         [-3.81,  +6.0, 2]]
+      - [[ -3.81,  +6.0,   1],
+         [ -3.81, -22.2,   1],
+         [ +5.0,  -22.2,   1],
+         [ +5.0,  -17.0,   1]]
+      - [[ +5.0,  -22.2, 1],
+         [+27.62, -22.2, 1],
+         [+27.62, -17.0, 1]]
+
+  - signal: SCL
+    legs:
+      # L1 east escape from J1B.2; layer transitions to L2 between legs
+      # are silent (the escape via is drilled separately by the existing
+      # _punch_extra_holes path — no path-level via emitted here).
+      - [[-12.22, -14.46, 1],
+         [-10.0,  -14.46, 1]]
+      # L2 north up the escape column → L2 east along the highway →
+      # L2 south stub onto OLED J4.3 at (1.27, +10).
+      - [[-10.0, -14.46, 2],
+         [-10.0, +17.0,  2],
+         [ +1.27, +17.0, 2],
+         [ +1.27, +10.0, 2]]
+      # Fork at (1.27, +17): highway continues east to the bridge column.
+      - [[ +1.27, +17.0,  2],
+         [+17.0,  +17.0,  2],
+         [+17.0,  -20.6,  2]]
+      # SCL bridge bottom: layer transitions back to L1 here (the bridge
+      # hole is drilled separately by _punch_extra_holes). L1 west to J2.3.
+      - [[+17.0,  -20.6, 1],
+         [+10.08, -20.6, 1],
+         [+10.08, -17.0, 1]]
+      # Fork at (17, -20.6): L1 east to J3.3.
+      - [[+17.0,  -20.6, 1],
+         [+25.08, -20.6, 1],
+         [+25.08, -17.0, 1]]
+
+  - signal: SDA
+    # Two path-level vias bracket the central L2 climb. The per-pin sensor
+    # extension vias are drilled by _punch_extra_holes; only the trunk
+    # climb vias appear in the path elements (matches the hand-coded
+    # Tier2SubstrateOption2 path stream).
+    vias:
+      - { x: -8.0, y: -23.6, diameter: 1.5, after_leg: 0 }
+      - { x: -8.0, y: +13.5, diameter: 1.5, after_leg: 1 }
+    legs:
+      # Master south to the south band at y=-23.6, then west onto the
+      # climb column x=-8.
+      - [[-12.22, -17.0,  1],
+         [-12.22, -23.6,  1],
+         [ -8.0,  -23.6,  1]]
+      # L2 climb up the central column from the south band to the
+      # north-of-pedestal highway at y=+13.5.
+      - [[-8.0, -23.6, 2],
+         [-8.0, +13.5, 2]]
+      # L1 east along the highway, south stub onto J4.4 at (3.81, +10).
+      - [[-8.0,  +13.5, 1],
+         [+3.81, +13.5, 1],
+         [+3.81, +10.0, 1]]
+      # Fork at (-8, -23.6): L1 east along the south band to the
+      # rightmost SDA sensor pin (J3.2 at +22.54). The two per-pin
+      # extensions branch off this east-leg below.
+      - [[ -8.0,  -23.6, 1],
+         [+22.54, -23.6, 1]]
+      # J2.4 per-pin extension: L2 stub at x=+11.62 (1 mm west of the
+      # pin column) up to y=-19, then via L2→L1 (drilled by
+      # _punch_extra_holes), then L1 45° NE to (+12.62, -18), then L1
+      # north onto the pin. Offsetting the via gives a 1.236 mm wall
+      # to the pin (vs 1.0 mm if the via sat on the pin column),
+      # clearing the 1.2 mm hole_pair_clearance floor.
+      - [[+11.62, -23.6, 2],
+         [+11.62, -19.0, 2]]
+      - [[+11.62, -19.0, 1],
+         [+12.62, -18.0, 1]]
+      - [[+12.62, -18.0, 1],
+         [+12.62, -17.0, 1]]
+      # J3.2 per-pin extension — mirrors the J2.4 pattern.
+      - [[+21.54, -23.6, 2],
+         [+21.54, -19.0, 2]]
+      - [[+21.54, -19.0, 1],
+         [+22.54, -18.0, 1]]
+      - [[+22.54, -18.0, 1],
+         [+22.54, -17.0, 1]]

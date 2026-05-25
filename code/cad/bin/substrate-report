@@ -1,0 +1,14 @@
+#!/usr/bin/env bash
+# Emit per-substrate JSON reports consumed by the gallery focus page.
+#
+# Writes one file per substrate class to code/web/src/reports/<name>.json,
+# where <name> matches the snake-case GLB stem (so the .astro page can
+# look up the report by manifest entry name).
+#
+# Each report carries the routing-score breakdown, pass/fail for every
+# routing invariant, and the full drilled-hole inventory. Skips classes
+# that can't be instantiated (e.g. require args) or have no routed nets.
+set -euo pipefail
+CAD_DIR="$(cd "$(dirname "$0")/.." && pwd)"
+exec uv --project "$CAD_DIR" run env PYTHONPATH="$CAD_DIR/src" \
+    python -m router.cli_report "$@"

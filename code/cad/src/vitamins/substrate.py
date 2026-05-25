@@ -79,6 +79,60 @@ class SignalPath:
 
 
 # ---------------------------------------------------------------------------
+# Channel + via cut helpers — module-level so both `Tier1Substrate.build()`
+# and `circuit.build_substrate()` can carve identical CSG holes for a given
+# WireSegment / Via. Pulled out of a nested closure in build() so the
+# declarative spec pipeline doesn't duplicate the geometry.
+# ---------------------------------------------------------------------------
+
+
+def _cut_segment(
+    shape,
+    seg: "WireSegment",
+    dim,
+    l1_z: float,
+    l2_z: float,
+    name: str,
+) -> None:
+    """Carve a single routed segment into `shape`. Uses the dim's
+    channel_width / channel_depth / overcut for box sizing and the
+    pre-computed L1/L2 z-centres for placement."""
+    cw = dim.channel_width
+    cd = dim.channel_depth
+    cm = dim.overcut
+    z = l1_z if seg.layer == 1 else l2_z
+    dx = seg.end.x - seg.start.x
+    dy = seg.end.y - seg.start.y
+    length = math.hypot(dx, dy)
+    cx = (seg.start.x + seg.end.x) / 2
+    cy = (seg.start.y + seg.end.y) / 2
+    # Box default extent is along +X. Rotate around Z to align with the
+    # segment direction so diagonals cut at 45° instead of axis-aligned.
+    angle_deg = math.degrees(math.atan2(dy, dx))
+    box = ad.Box([length + cm, cw, cd + cm])
+    shape.add_at(
+        box.hole(name).at("centre"),
+        post=ad.translate([cx, cy, z]) * ad.rotZ(angle_deg),
+    )
+
+
+def _cut_via(
+    shape,
+    via: "Via",
+    dim,
+    name: str,
+) -> None:
+    """Carve a through-hole via into `shape` at via.position. The
+    cylinder length spans the full plate plus a 0.4 mm CSG overcut so
+    the hole subtracts cleanly through both faces."""
+    cyl = ad.Cylinder(r=via.diameter / 2, h=dim.thickness + 0.4)
+    shape.add_at(
+        cyl.hole(name).at("centre"),
+        post=ad.translate([via.position.x, via.position.y, 0]),
+    )
+
+
+# ---------------------------------------------------------------------------
 # Substrate geometry constants
 # ---------------------------------------------------------------------------
 
@@ -659,6 +713,63 @@ _SCL_BRIDGE_BOTTOM_Y = -20.6
 _SDA_SENSOR_VIA_Y = -19.0
 
 
+# --- Option-2 SDA topology (Tier2SubstrateOption2 only) ----------------
+# Bundled's SDA climbs L2 along x=+34 to a north-shoulder highway at
+# y=+20 and crosses west to J4.4. Two visual costs of that topology:
+# the L2 east-leg sits on the visible top surface, and the centreline
+# x=+34 puts the channel boundary at x=+34.5 (channel_width/2 +
+# min_wall_thickness = 1.0) — outside the board outline at ±34.0, so
+# the wire prints exposed at the east face.
+#
+# Option 2 keeps the entire SDA master→OLED trunk on L1 (hidden when
+# the board is viewed top-down) and runs a new SDA highway SOUTH of
+# the OLED pedestal at y=+6.5 (between ESP32 pocket north at y=+4.82
+# and pedestal south at y=+8). The east-edge climb at x=+33.0 sits
+# 1.0 mm west of the board edge → +34.0 - (33.0 + channel_half_width
+# 0.4 + wall 0.6) = 0.0 mm clear of the new edge-exposure check.
+#
+# The south band runs at y=-23.6 (not -22.5 as in bundled). The
+# bundled SDA L2 east-leg at y=-22.5 was safe because GND's L1 east-leg
+# at y=-22.2 sits on a DIFFERENT layer; with SDA on L1 in option 2 the
+# two channels would share L1 at y=-22.5 vs -22.2 (0.3 mm centre-to-
+# centre, walls below the FDM floor). Moving SDA's south band to
+# y=-23.6 gives 1.4 mm centre-to-centre to GND — the minimum
+# `channel_width + min_wall_thickness` (0.8 + 0.6 = 1.4).
+#
+# Sensor extensions retain the per-pin L2 stub + via topology from
+# bundled: a pure-L1 north stub from y=-23.6 to y=-17 at x=+12.62
+# (J2.4) and x=+22.54 (J3.2) would cross SCL's L1 east-west at
+# y=-20.6, which is a same-layer foreign-signal crossing. The
+# existing L2 stub + via at y=-19.0 sidesteps that crossing.
+# SDA highway north of the OLED pedestal. y=+13.5 sits 1.5 mm north
+# of the pedestal north edge (+12.0): channel south boundary +13.1 →
+# 1.1 mm wall to pedestal. Also 1.5 mm north of VCC's L1 OLED-only
+# highway at y=+12.0: channel-to-channel wall = 1.5 - 0.8 = 0.7 mm
+# (above the 0.6 mm floor). South-of-pedestal routing (the earlier
+# attempt at y=+6.5/+7.0) was blocked: the gap between the OLED
+# return holes (north edge +6.25) and the pedestal south edge (+8.0)
+# is too narrow for an L1 channel to thread with ≥ 0.6 mm walls on
+# both sides — no y satisfies both constraints simultaneously.
+_SDA_HIGHWAY_Y_OPT2 = 13.5
+# Column where the SDA trunk transitions L1→L2 for the climb. Placed
+# east of the ESP32 pocket east edge (-12.11) but west of every OLED
+# return hole (closest at -4.55) — clear of every L1 same-layer
+# crossing risk in xy. The climb runs on L2 (top) so it doesn't
+# collide with GND's L1 east-leg highway at y=+5 (x ∈ [-22, -4.55])
+# or VCC's L1 east-leg highway at y=+12 (x ∈ [-25, -2.05]); both
+# are L1 and at different z than the L2 climb. The L2 column has no
+# L2-foreign features in its xy/z footprint either (SCL's L2 rise is
+# at x=-10, 2 mm away — 1.2 mm channel-to-channel wall). The climb
+# is partially visible from above (it's a top-of-plate groove in the
+# central area), but it is NOT on or near the +X board edge and does
+# NOT thread the narrow strip beside the BH1750 pocket.
+_SDA_CLIMB_X_OPT2 = -8.0
+# Trunk east-leg reaches the rightmost SDA sensor pin so per-pin stubs
+# can branch off the same south-band channel. J3.2 sits at +22.54.
+_SDA_EAST_LEG_END_X_OPT2 = 22.54
+_SDA_SOUTH_BAND_Y_OPT2 = -23.6
+
+
 def _build_oled_only_power_paths(nets: dict) -> List[SignalPath]:
     """One snake per power signal: master → OLED → SCD41 → BH1750.
 
@@ -834,10 +945,16 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
                 if sensor_pin is None:
                     continue
                 pin_xy = _pin_position(sensor_pin)
-                south_band = Point2D(pin_xy.x, _SDA_SOUTH_DETOUR_Y)
-                via_xy = Point2D(pin_xy.x, _SDA_SENSOR_VIA_Y)
-                elements.append(WireSegment(south_band, via_xy, 2))  # L2 stub north
-                elements.append(WireSegment(via_xy, pin_xy, 1))      # L1 stub to pin
+                # Via 1 mm west of pin column + 45° L1 stub onto pin.
+                # See `_build_sda_option2_path` for the wall-clearance
+                # justification (1.236 mm via↔pin wall).
+                via_x = pin_xy.x - 1.0
+                south_band = Point2D(via_x, _SDA_SOUTH_DETOUR_Y)
+                via_xy = Point2D(via_x, _SDA_SENSOR_VIA_Y)
+                elbow_xy = Point2D(pin_xy.x, _SDA_SENSOR_VIA_Y + 1.0)
+                elements.append(WireSegment(south_band, via_xy, 2))   # L2 stub north
+                elements.append(WireSegment(via_xy, elbow_xy, 1))     # L1 45° NE
+                elements.append(WireSegment(elbow_xy, pin_xy, 1))     # L1 N onto pin
         else:  # SCL
             # L1 east past the ESP32 pocket east edge, then via to L2.
             l1_end = Point2D(_BUS_L1_ESCAPE_X, master.y)
@@ -878,16 +995,13 @@ def _build_bus_signal_paths(nets: dict) -> List[SignalPath]:
 
 def _bus_bridge_via_positions(nets: dict) -> list[tuple[Point2D, str]]:
     """L1↔L2 transition vias drilled at via_diameter = 1.5 mm. The
-    SCL escape and SDA escape vias sit just outside the ESP32 pocket
-    where the extra width is harmless. The narrower L1↔L2 holes
-    (SCL bridge bottom, SDA OLED entry) use hole_diameter and are
-    in `_bus_bridge_hole_positions` instead."""
+    SDA escape via sits in open south band where the extra width is
+    harmless. The SCL escape moved to hole_diameter (1.0 mm) — at
+    2.22 mm from the master pin, the 1.5 mm via left only 0.97 mm
+    wall and tripped `test_hole_pair_wall_floor`. See
+    `_bus_bridge_hole_positions`."""
     from netlist import I2cSignal
     out: list[tuple[Point2D, str]] = []
-    net_scl = nets.get(I2cSignal.SCL)
-    if net_scl is not None:
-        master_scl = _pin_position(net_scl.master_pin)
-        out.append((Point2D(_BUS_L1_ESCAPE_X, master_scl.y), "scl_escape_via"))
     net_sda = nets.get(I2cSignal.SDA)
     if net_sda is not None:
         master_sda = _pin_position(net_sda.master_pin)
@@ -906,11 +1020,19 @@ def _bus_bridge_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
     from netlist import I2cSignal
     out: list[tuple[Point2D, str]] = []
     net_scl = nets.get(I2cSignal.SCL)
-    if net_scl is not None and any(p.ref in ("J2", "J3") for p in net_scl.device_pins):
-        out.append((
-            Point2D(_SCL_BRIDGE_X, _SCL_BRIDGE_BOTTOM_Y),
-            "scl_bridge",
-        ))
+    if net_scl is not None:
+        master_scl = _pin_position(net_scl.master_pin)
+        # SCL escape: L1→L2 transition just outside ESP32 pocket. Uses
+        # hole_diameter (1.0 mm) instead of via_diameter (1.5 mm) so
+        # the wall to the J1B.2 master pin (2.22 mm centres) is 1.22 mm
+        # — above the 1.2 mm hole_pair_clearance floor. A 1.5 mm via
+        # left only 0.97 mm wall.
+        out.append((Point2D(_BUS_L1_ESCAPE_X, master_scl.y), "scl_escape"))
+        if any(p.ref in ("J2", "J3") for p in net_scl.device_pins):
+            out.append((
+                Point2D(_SCL_BRIDGE_X, _SCL_BRIDGE_BOTTOM_Y),
+                "scl_bridge",
+            ))
     net_sda = nets.get(I2cSignal.SDA)
     if net_sda is not None:
         sda_oled = next((p for p in net_sda.device_pins if p.ref == "J4"), None)
@@ -928,8 +1050,9 @@ def _bus_bridge_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
             if sensor_pin is None:
                 continue
             pin_xy = _pin_position(sensor_pin)
+            # 1 mm west of pin column to meet hole_pair_clearance.
             out.append((
-                Point2D(pin_xy.x, _SDA_SENSOR_VIA_Y),
+                Point2D(pin_xy.x - 1.0, _SDA_SENSOR_VIA_Y),
                 f"sda_{sensor_ref.lower()}_entry",
             ))
     return out
@@ -958,6 +1081,167 @@ def _oled_only_return_hole_positions(nets: dict) -> list[tuple[Point2D, str]]:
     return out
 
 
+def _build_sda_option2_path(nets: dict) -> SignalPath:
+    """SDA route on `Tier2SubstrateOption2`, authored via the waypoint
+    helper.
+
+    Trunk (master → OLED): J1B.1 → L1 south → L1 east along the south
+    band at y=-23.6 → L1 north up x=+33.0 → L1 west along the south-of-
+    pedestal highway at y=+6.5 → L1 north stub up to J4.4. The entire
+    trunk stays on L1; the channel is hidden under the substrate when
+    viewed top-down.
+
+    Sensor extensions (J2.4, J3.2): per-pin L2 stub from the south band
+    at (pin_x, -23.6) north to (pin_x, -19), L2→L1 transition via at
+    y=-19, L1 stub from (pin_x, -19) north to the pin. The pure-L1
+    alternative is blocked by SCL's L1 east-west band at y=-20.6.
+    """
+    from netlist import I2cSignal
+    # Lazy import keeps `router` out of `substrate`'s import-time
+    # graph and matches the same pattern as `voxel_suggester`.
+    from router.paths import Waypoint, waypoints_to_path
+
+    net = nets.get(I2cSignal.SDA)
+    if net is None:
+        return SignalPath(name="sda", elements=())
+
+    master = _pin_position(net.master_pin)
+    oled_pin = next((p for p in net.device_pins if p.ref == "J4"), None)
+    if oled_pin is None:
+        return SignalPath(name="sda", elements=())
+    oled_xy = _pin_position(oled_pin)
+
+    south_y = _SDA_SOUTH_BAND_Y_OPT2
+    climb_x = _SDA_CLIMB_X_OPT2
+    east_leg_end_x = _SDA_EAST_LEG_END_X_OPT2
+    highway_y = _SDA_HIGHWAY_Y_OPT2
+
+    # Trunk (master → OLED): primary signal runs through the centre,
+    # not along the east edge. master → L1 south to south band → L1
+    # west a short distance to climb_x (just east of the ESP32 pocket,
+    # west of every OLED return hole) → L1↔L2 via → L2 climb up the
+    # central column → L1↔L2 via at the north-of-pedestal highway
+    # band → L1 east along the highway over the pedestal → L1 south
+    # stub down onto the OLED pin (passes under the pedestal for the
+    # last ~2 mm, hidden by it).
+    trunk_wps = [
+        Waypoint(master, 1),
+        Waypoint(Point2D(master.x, south_y), 1),
+        Waypoint(Point2D(climb_x, south_y), 1),
+        Waypoint(Point2D(climb_x, south_y), 2),       # L1→L2 via at climb bottom
+        Waypoint(Point2D(climb_x, highway_y), 2),
+        Waypoint(Point2D(climb_x, highway_y), 1),     # L2→L1 via at climb top
+        Waypoint(Point2D(oled_xy.x, highway_y), 1),
+        Waypoint(oled_xy, 1),
+    ]
+    trunk = waypoints_to_path("sda", trunk_wps)
+
+    # Sensor branch: a secondary L1 east-leg taps off the trunk at
+    # (climb_x, south_y) and continues east along the south band to
+    # the rightmost SDA sensor pin (J3.2 at +22.54). The channels
+    # intersect at the fork point so the signal stays continuous.
+    sensor_east_leg = WireSegment(
+        Point2D(climb_x, south_y),
+        Point2D(east_leg_end_x, south_y),
+        1,
+    )
+
+    # Per-pin sensor extensions stitched onto the same path so the
+    # connectivity test sees J2.4 / J3.2 as endpoints of the `sda`
+    # path. Each extension is a 3-element subpath (L2 stub, via, L1
+    # stub) — emitted directly rather than via the waypoint helper
+    # because the L2 stub doesn't share xy with the east-leg endpoint
+    # (the east-leg is fully on L1 along y=south_y, and the sensor
+    # stub climbs on L2 to clear SCL's L1 east-west at y=-20.6).
+    sensor_segments: list = [sensor_east_leg]
+    for sensor_ref in ("J2", "J3"):
+        sensor_pin = next(
+            (p for p in net.device_pins if p.ref == sensor_ref), None
+        )
+        if sensor_pin is None:
+            continue
+        pin_xy = _pin_position(sensor_pin)
+        # Sensor entry via offset 1 mm west of the pin column so the
+        # via↔pin wall clears the 1.2 mm hole_pair_clearance floor:
+        # √(1² + 2²) − 0.5 − 0.5 = 1.236 mm. On the pin column the
+        # wall was 2.0 − 0.5 − 0.5 = 1.0 mm (test_hole_pair_wall_floor).
+        # The L1 stub from via→pin becomes a 45° NE diagonal of length
+        # √2 mm followed by a 1 mm N segment onto the pin.
+        via_x = pin_xy.x - 1.0
+        south_band = Point2D(via_x, south_y)
+        via_xy = Point2D(via_x, _SDA_SENSOR_VIA_Y)
+        elbow_xy = Point2D(pin_xy.x, _SDA_SENSOR_VIA_Y + 1.0)
+        sensor_segments.append(WireSegment(south_band, via_xy, 2))
+        sensor_segments.append(WireSegment(via_xy, elbow_xy, 1))
+        sensor_segments.append(WireSegment(elbow_xy, pin_xy, 1))
+
+    return SignalPath(
+        name="sda",
+        elements=tuple(list(trunk.elements) + sensor_segments),
+    )
+
+
+def _build_scl_path_only(nets: dict) -> List[SignalPath]:
+    """SCL portion of `_build_bus_signal_paths` — unchanged from bundled.
+    Returns a list of length 1 (SCL only) so it composes with the
+    option-2 SDA path."""
+    all_bus = _build_bus_signal_paths(nets)
+    return [p for p in all_bus if p.name == "scl"]
+
+
+def _bus_bridge_via_positions_option2(nets: dict) -> list[tuple[Point2D, str]]:
+    """Option-2 vias drilled at via_diameter = 1.5 mm:
+      - SDA climb bottom: L1→L2 at (climb_x, south_y) so the central
+        climb can cross GND's L1 corridor (y=-22.2) and VCC's L1
+        corridor (y=-15.3) without same-layer collisions
+      - SDA climb top:    L2→L1 at (climb_x, highway_y) returning the
+        signal to L1 for the south-of-pedestal highway
+    The SCL escape is in `_bus_bridge_hole_positions_option2` — uses
+    hole_diameter (1.0 mm) to clear the 1.2 mm hole_pair floor against
+    the J1B.2 master pin.
+    """
+    from netlist import I2cSignal
+    out: list[tuple[Point2D, str]] = []
+    net_sda = nets.get(I2cSignal.SDA)
+    if net_sda is not None:
+        out.append((Point2D(_SDA_CLIMB_X_OPT2, _SDA_SOUTH_BAND_Y_OPT2), "sda_climb_bottom_via"))
+        out.append((Point2D(_SDA_CLIMB_X_OPT2, _SDA_HIGHWAY_Y_OPT2), "sda_climb_top_via"))
+    return out
+
+
+def _bus_bridge_hole_positions_option2(nets: dict) -> list[tuple[Point2D, str]]:
+    """Option-2 holes: SCL escape + SCL bridge bottom (1.0 mm vs 1.5 mm
+    via) plus SDA per-pin L2→L1 transitions at the sensor extensions.
+    The bundled-only `sda_oled_entry` hole is removed (no layer change
+    in option-2)."""
+    from netlist import I2cSignal
+    out: list[tuple[Point2D, str]] = []
+    net_scl = nets.get(I2cSignal.SCL)
+    if net_scl is not None:
+        master_scl = _pin_position(net_scl.master_pin)
+        out.append((Point2D(_BUS_L1_ESCAPE_X, master_scl.y), "scl_escape"))
+        if any(p.ref in ("J2", "J3") for p in net_scl.device_pins):
+            out.append((
+                Point2D(_SCL_BRIDGE_X, _SCL_BRIDGE_BOTTOM_Y),
+                "scl_bridge",
+            ))
+    net_sda = nets.get(I2cSignal.SDA)
+    if net_sda is not None:
+        for sensor_ref in ("J2", "J3"):
+            sensor_pin = next(
+                (p for p in net_sda.device_pins if p.ref == sensor_ref), None
+            )
+            if sensor_pin is None:
+                continue
+            pin_xy = _pin_position(sensor_pin)
+            # 1 mm west of pin column to meet hole_pair_clearance.
+            out.append((
+                Point2D(pin_xy.x - 1.0, _SDA_SENSOR_VIA_Y),
+                f"sda_{sensor_ref.lower()}_entry",
+            ))
+    return out
+
+
 # ---------------------------------------------------------------------------
 # AnchorSCAD vitamin
 # ---------------------------------------------------------------------------
@@ -980,6 +1264,25 @@ class Tier1SubstrateDimensions:
     # each void by `min_wall_thickness / 2` and flags inflated overlaps
     # between different signals as a wall-thickness failure.
     min_wall_thickness: float = 0.6
+    # Minimum substrate between a routed channel's outer boundary and
+    # the board outline. Stricter than `min_wall_thickness` on purpose:
+    # the inter-signal wall floor is what the printer can resolve, but
+    # an EDGE wall that thin would flake off in handling and expose the
+    # wire at the board face. Defaulting to one channel-width (0.8 mm)
+    # guarantees at least one wire-of-substrate between any channel and
+    # the outline. Override per-subclass if a variant trims the board.
+    edge_clearance: float = 0.8
+    # Minimum substrate between any two drilled holes (pin / via /
+    # return). Same intent as `edge_clearance` for channels: the
+    # printer can resolve `min_wall_thickness` between voids, but a
+    # vertical pillar of plastic between two close through-holes is
+    # weaker than a horizontal wall — handling, plugging in headers,
+    # and seating wires all stress it. Default 1.2 mm = 2× the wall
+    # floor: enough for a wire-sized pillar of plastic between any
+    # two holes. Below this the pair is a topology smell — usually a
+    # via is over-large or two features are piggybacking on the same
+    # xy and the design should merge them or shrink one.
+    hole_pair_clearance: float = 1.2
     # Clearance from the OUTERMOST ESP32 pin through-hole to the
     # nearest pocket wall, measured pin-centre to wall. The default
     # 1.5 mm matches the ESP32-C3 SuperMini's USB-C overhang: the
@@ -1250,42 +1553,16 @@ class Tier1Substrate(ad.CompositeShape):
                      d.bh1750.pcb_thickness, "pocket_bh1750")
 
         # ---- routing channels + vias ----------------------------------
-        def cut_segment(seg: WireSegment, name: str) -> None:
-            cw = d.channel_width
-            cd = d.channel_depth
-            cm = d.overcut
-            z = l1_z if seg.layer == 1 else l2_z
-            dx = seg.end.x - seg.start.x
-            dy = seg.end.y - seg.start.y
-            length = math.hypot(dx, dy)
-            cx = (seg.start.x + seg.end.x) / 2
-            cy = (seg.start.y + seg.end.y) / 2
-            # Box default extent is along +X. Rotate around Z to align
-            # with the segment direction so diagonals cut at 45° instead
-            # of collapsing into axis-aligned drops.
-            angle_deg = math.degrees(math.atan2(dy, dx))
-            box = ad.Box([length + cm, cw, cd + cm])
-            shape.add_at(
-                box.hole(name).at("centre"),
-                post=ad.translate([cx, cy, z]) * ad.rotZ(angle_deg),
-            )
-
-        def cut_via(via: Via, name: str) -> None:
-            cyl = ad.Cylinder(r=via.diameter / 2, h=d.thickness + 0.4)
-            shape.add_at(
-                cyl.hole(name).at("centre"),
-                post=ad.translate([via.position.x, via.position.y, 0]),
-            )
-
         seg_idx = 0
         via_idx = 0
         for path in self._get_signal_paths():
             for elem in path.elements:
                 if isinstance(elem, WireSegment):
-                    cut_segment(elem, f"{path.name}_seg_{seg_idx}")
+                    _cut_segment(shape, elem, d, l1_z, l2_z,
+                                 f"{path.name}_seg_{seg_idx}")
                     seg_idx += 1
                 else:
-                    cut_via(elem, f"{path.name}_via_{via_idx}")
+                    _cut_via(shape, elem, d, f"{path.name}_via_{via_idx}")
                     via_idx += 1
 
         return shape
@@ -1520,3 +1797,260 @@ class Tier2SubstrateBundled(Tier2Substrate):
                 hole.hole(name).at("centre"),
                 post=ad.translate([pt.x, pt.y, 0]),
             )
+
+
+@ad.shape
+@datatree
+class Tier2SubstrateOption2(Tier2SubstrateBundled):
+    """`Tier2SubstrateBundled` with SDA rerouted entirely on L1.
+
+    Bundled's SDA topology climbs L2 along x=+34 from the south band
+    to a north-shoulder highway at y=+20, then crosses west to J4.4.
+    Three things go wrong with that:
+      1. The channel centreline at x=+34 sits exactly on the board
+         outline — inflated to x=+34.5 the channel surfaces at the
+         east face (caught by `test_no_channel_on_board_edge`).
+      2. The long L2 east-leg + highway leg are visible on the top
+         surface, undermining the "all-routing-hidden" property.
+      3. The L1 stub at (+3.81, y∈[+10..+20]) crosses the OLED
+         pedestal underside.
+    Option 2 keeps the entire SDA master→OLED trunk on L1, runs a new
+    SDA highway SOUTH of the pedestal at y=+6.5, and pulls the east-
+    edge climb in to x=+33.0 (clear of the inflated edge boundary).
+    SCL is unchanged. Sensor extensions keep the bundled L2 stub +
+    L1 stub topology — a pure-L1 stub to J2.4/J3.2 would cross SCL's
+    L1 east-west at y=-20.6.
+
+    Kept as a sibling of `Tier2SubstrateBundled` (not a replacement)
+    so the route-scoring CLI has a before/after pair to compare.
+    """
+
+    def _get_signal_paths(self) -> List[SignalPath]:
+        from netlist import TIER2_NETS
+        paths = (
+            _build_oled_only_power_paths(TIER2_NETS)
+            + _build_scl_path_only(TIER2_NETS)
+            + [_build_sda_option2_path(TIER2_NETS)]
+        )
+        from voxel_suggester import apply_chamfers
+        return apply_chamfers(self, paths)
+
+    def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
+        from netlist import TIER2_NETS
+        # Use Tier2Substrate's hole list (skipping Tier2SubstrateBundled's
+        # bus-bridge holes) and append the option-2 bus holes. Going to
+        # Tier2Substrate directly via super().__class__.__mro__ would
+        # be brittle — just call its method by class reference.
+        return (
+            Tier2Substrate._drilled_hole_positions(self)
+            + list(_oled_only_return_hole_positions(TIER2_NETS))
+            + list(_bus_bridge_via_positions_option2(TIER2_NETS))
+            + list(_bus_bridge_hole_positions_option2(TIER2_NETS))
+        )
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        # Skip Tier2SubstrateBundled's bus-bridge punch (which uses the
+        # bundled hole list) and call Tier2Substrate.punch directly so
+        # the OLED receptacle holes are punched without the SDA-OLED
+        # entry / SDA-escape vias that don't exist in option 2.
+        Tier2Substrate._punch_extra_holes(self, shape, d)
+        from netlist import TIER2_NETS
+        hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
+        for pt, name in _oled_only_return_hole_positions(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        via = ad.Cylinder(r=d.via_diameter / 2, h=d.thickness + 0.4)
+        for pt, name in _bus_bridge_via_positions_option2(TIER2_NETS):
+            shape.add_at(
+                via.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        for pt, name in _bus_bridge_hole_positions_option2(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+
+
+# ---------------------------------------------------------------------------
+# Spec-driven sibling — same geometry as Tier2SubstrateOption2, but the
+# route topology is read from `code/cad/specs/tier2_option2.yaml`. Proves
+# the declarative pipeline can faithfully express the hand-coded variant;
+# parity is enforced by `tests/test_circuit_spec.py::test_spec_matches_option2`.
+# Reuses Option2's hole / pocket / pedestal geometry so the only thing
+# under spec control today is the route waypoint list (the deliverable's
+# whole point — edit YAML, re-render).
+# ---------------------------------------------------------------------------
+
+
+_DEFAULT_TIER2_SPEC_PATH = "specs/tier2_option2.yaml"
+
+
+def _resolve_spec_path(spec_path: str) -> str:
+    """Resolve a spec path relative to the cad package root if the path
+    is relative — keeps the YAML reference in CLI-friendly form."""
+    import os
+
+    if os.path.isabs(spec_path):
+        return spec_path
+    # __file__ is .../cad/src/vitamins/substrate.py; the cad root is two
+    # parents up from the package dir.
+    cad_root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)
+    )))
+    return os.path.join(cad_root, spec_path)
+
+
+@ad.shape
+@datatree
+class Tier2SubstrateFromSpec(Tier2SubstrateOption2):
+    """Tier2SubstrateOption2 with routes AND drilled holes loaded from a
+    YAML CircuitSpec.
+
+    Overrides `_get_signal_paths` (routes from spec), `_drilled_hole_positions`
+    (vias from `route.vias` instead of option2's hard-coded constants),
+    and `_punch_extra_holes` (drill the spec's vias, not option2's).
+    Without these last two, a variant whose YAML moves a trunk via
+    (e.g. climb_x = -7 instead of option2's -8) still gets its hole
+    drilled at the option2 constant — the GLB channels go to -7 but
+    the via hole sits at -8, electrically disconnected. The user
+    flagged this as "mixing declarative config with old stuff".
+
+    Pin holes, OLED receptacles, OLED-return holes, and the SCL bridge
+    holes still come from the parent — those are stable across variants
+    and don't appear in the spec's `vias` block.
+    """
+
+    spec_path: str = _DEFAULT_TIER2_SPEC_PATH
+
+    def _load_spec(self):
+        # Lazy import — `circuit` imports back into this module for
+        # `Tier1SubstrateDimensions`, `_cut_segment`, etc.
+        from circuit import load_spec
+        return load_spec(_resolve_spec_path(self.spec_path))
+
+    def _get_signal_paths(self) -> List[SignalPath]:
+        from circuit import route_to_signal_path
+        spec = self._load_spec()
+        paths = [route_to_signal_path(r) for r in spec.routes]
+        from voxel_suggester import apply_chamfers
+        return apply_chamfers(self, paths)
+
+    def _spec_via_holes(self) -> list[tuple["Point2D", str]]:
+        """Drilled holes corresponding to each ViaSpec in the spec.
+        Name suffix encodes diameter so the test's `_hole_diameter`
+        dispatch (and `_punch_extra_holes` below) pick the right drill:
+        diameter >= via_diameter → `_via` suffix → 1.5 mm; otherwise no
+        suffix → hole_diameter (1.0 mm)."""
+        spec = self._load_spec()
+        out: list[tuple[Point2D, str]] = []
+        for route in spec.routes:
+            sig = route.signal.name.lower()
+            for idx, v in enumerate(route.vias):
+                wide = v.diameter >= self.dim.via_diameter - 1e-6
+                suffix = "_via" if wide else ""
+                out.append((Point2D(v.x, v.y), f"{sig}_spec_{idx}{suffix}"))
+        return out
+
+    def _drilled_hole_positions(self) -> list[tuple["Point2D", str]]:
+        from netlist import TIER2_NETS
+        # Start from Tier2Substrate (pin holes + module pockets), add
+        # OLED return holes (unchanged across spec variants), then add
+        # spec-derived vias. SCL bridge / escape (still in
+        # `_bus_bridge_hole_positions_option2`) stay until those move
+        # into the spec too — currently they're shared across every
+        # variant so the option2 constants happen to match every YAML.
+        return (
+            Tier2Substrate._drilled_hole_positions(self)
+            + list(_oled_only_return_hole_positions(TIER2_NETS))
+            + list(_bus_bridge_hole_positions_option2(TIER2_NETS))
+            + self._spec_via_holes()
+        )
+
+    def _punch_extra_holes(self, shape, d: Tier1SubstrateDimensions) -> None:
+        # Skip Tier2SubstrateOption2._punch_extra_holes (which drills
+        # the option2 trunk-via constants) and call Tier2Substrate's
+        # directly for receptacles. Then drill OLED return holes, SCL
+        # bridge/escape (option2 hole positions — unchanged across
+        # variants), and finally each spec-derived via at its declared
+        # diameter.
+        Tier2Substrate._punch_extra_holes(self, shape, d)
+        from netlist import TIER2_NETS
+        hole = ad.Cylinder(r=d.hole_diameter / 2, h=d.thickness + 0.4)
+        for pt, name in _oled_only_return_hole_positions(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        for pt, name in _bus_bridge_hole_positions_option2(TIER2_NETS):
+            shape.add_at(
+                hole.hole(name).at("centre"),
+                post=ad.translate([pt.x, pt.y, 0]),
+            )
+        # Spec vias: each gets its own cylinder at the spec's diameter.
+        spec = self._load_spec()
+        for route in spec.routes:
+            sig = route.signal.name.lower()
+            for idx, v in enumerate(route.vias):
+                cyl = ad.Cylinder(r=v.diameter / 2, h=d.thickness + 0.4)
+                shape.add_at(
+                    cyl.hole(f"{sig}_spec_{idx}").at("centre"),
+                    post=ad.translate([v.x, v.y, 0]),
+                )
+
+
+# ---------------------------------------------------------------------------
+# Auto-discovery: every YAML in code/cad/specs/ becomes a substrate class
+# in this module's namespace, so AnchorSCAD's `auto_register_module` picks
+# it up (renders to build/<snake_name>.glb) and the test fixture in
+# tests/test_substrate_routing.py merges SPEC_SUBSTRATES into its params.
+# Drop a new YAML into specs/, run `bin/render`, see a new gallery card —
+# no Python edits needed. The default spec (tier2_option2.yaml) is
+# already exposed as bare `Tier2SubstrateFromSpec`, so we skip it here
+# to avoid a duplicate.
+# ---------------------------------------------------------------------------
+
+
+def _discover_spec_substrates() -> dict:
+    """Walk specs/*.yaml; emit one Tier2SubstrateFromSpec subclass per
+    file with `spec_path` defaulted to that file. Class names follow
+    `Substrate_<spec_stem>` so `camel_to_snake` in registry produces a
+    readable GLB name (`substrate_<spec_stem>.glb`)."""
+    import os
+    out: dict = {}
+    cad_root = os.path.dirname(os.path.dirname(os.path.dirname(
+        os.path.abspath(__file__)
+    )))
+    specs_dir = os.path.join(cad_root, "specs")
+    if not os.path.isdir(specs_dir):
+        return out
+    for fname in sorted(os.listdir(specs_dir)):
+        if not fname.endswith(".yaml"):
+            continue
+        stem = fname[:-len(".yaml")]
+        if stem == "tier2_option2":
+            # Already exposed via the default spec_path of Tier2SubstrateFromSpec.
+            continue
+        rel_path = f"specs/{fname}"
+        cls = _make_spec_substrate_class(stem, rel_path)
+        out[stem] = cls
+        globals()[cls.__name__] = cls
+    return out
+
+
+def _make_spec_substrate_class(stem: str, rel_path: str) -> type:
+    """Class factory: redo @ad.shape + @datatree so the new `spec_path`
+    default actually replaces the parent's at class-creation time."""
+    @ad.shape
+    @datatree
+    class _SpecSubstrate(Tier2SubstrateFromSpec):
+        spec_path: str = rel_path
+    _SpecSubstrate.__name__ = f"Substrate_{stem}"
+    _SpecSubstrate.__qualname__ = _SpecSubstrate.__name__
+    _SpecSubstrate.__module__ = __name__
+    return _SpecSubstrate
+
+
+SPEC_SUBSTRATES = _discover_spec_substrates()
