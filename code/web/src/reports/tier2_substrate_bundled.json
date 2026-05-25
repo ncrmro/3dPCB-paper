@@ -1,0 +1,198 @@
+{
+  "name": "tier2_substrate_bundled",
+  "class": "Tier2SubstrateBundled",
+  "spec_path": null,
+  "score": {
+    "total_length_mm": 469.5,
+    "l1_length_mm": 238.25,
+    "l2_length_mm": 231.25,
+    "via_count": 10,
+    "edge_clearance_min_mm": -1.0,
+    "pedestal_underside_mm": 10.644,
+    "aggregate": 778.88
+  },
+  "invariants": [
+    {
+      "key": "angles_45_or_90",
+      "label": "45\u00b0 / 90\u00b0 segments",
+      "passed": true,
+      "message": "all segments at 0\u00b0/\u00b145\u00b0/\u00b190\u00b0/\u00b1135\u00b0/180\u00b0"
+    },
+    {
+      "key": "edge_clearance",
+      "label": "Edge clearance",
+      "passed": false,
+      "message": "3 violation(s); first: sda L2 east: clr -0.40 < 0.80"
+    },
+    {
+      "key": "hole_pair_clearance",
+      "label": "Hole-pair clearance",
+      "passed": true,
+      "message": "all hole pairs \u2265 1.20 mm apart"
+    },
+    {
+      "key": "voxel_overlap",
+      "label": "No inter-signal voxel overlap",
+      "passed": true,
+      "message": "no inter-signal voxel overlap"
+    },
+    {
+      "key": "pin_connectivity",
+      "label": "Pin connectivity",
+      "passed": true,
+      "message": "all routed pins reached by their signal path"
+    }
+  ],
+  "holes": [
+    {
+      "name": "J1A.2",
+      "x": -30.0,
+      "y": -14.46,
+      "diameter": 1.0
+    },
+    {
+      "name": "J1A.3",
+      "x": -30.0,
+      "y": -11.92,
+      "diameter": 1.0
+    },
+    {
+      "name": "J1B.1",
+      "x": -12.22,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J1B.2",
+      "x": -12.22,
+      "y": -14.46,
+      "diameter": 1.0
+    },
+    {
+      "name": "J2.1",
+      "x": 5.0,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J2.2",
+      "x": 7.54,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J2.3",
+      "x": 10.08,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J2.4",
+      "x": 12.62,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J3.1",
+      "x": 20.0,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J3.2",
+      "x": 22.54,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J3.3",
+      "x": 25.08,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J3.4",
+      "x": 27.62,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J3.5",
+      "x": 30.16,
+      "y": -17.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "J4.1",
+      "x": -3.81,
+      "y": 10.0,
+      "diameter": 1.25
+    },
+    {
+      "name": "J4.2",
+      "x": -1.27,
+      "y": 10.0,
+      "diameter": 1.25
+    },
+    {
+      "name": "J4.3",
+      "x": 1.27,
+      "y": 10.0,
+      "diameter": 1.25
+    },
+    {
+      "name": "J4.4",
+      "x": 3.81,
+      "y": 10.0,
+      "diameter": 1.25
+    },
+    {
+      "name": "vcc_oled_return",
+      "x": -1.27,
+      "y": 6.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "gnd_oled_return",
+      "x": -3.81,
+      "y": 6.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "sda_escape_via",
+      "x": -12.22,
+      "y": -22.5,
+      "diameter": 1.5
+    },
+    {
+      "name": "scl_escape",
+      "x": -10.0,
+      "y": -14.46,
+      "diameter": 1.0
+    },
+    {
+      "name": "scl_bridge",
+      "x": 17.0,
+      "y": -20.6,
+      "diameter": 1.0
+    },
+    {
+      "name": "sda_oled_entry",
+      "x": 3.81,
+      "y": 20.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "sda_j2_entry",
+      "x": 11.62,
+      "y": -19.0,
+      "diameter": 1.0
+    },
+    {
+      "name": "sda_j3_entry",
+      "x": 21.54,
+      "y": -19.0,
+      "diameter": 1.0
+    }
+  ]
+}

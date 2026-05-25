@@ -26,6 +26,10 @@ interface CadModel {
   name: string;
   glb: string;
   camera?: string;
+  // `vitamin` flags AnchorSCAD-built approximations of off-the-shelf
+  // parts (sensors, modules). Omitted entries are treated as substrate
+  // / carrier / assembly and rendered at the larger size.
+  type?: "vitamin";
 }
 
 interface CadManifest {
@@ -34,12 +38,20 @@ interface CadManifest {
   models: CadModel[];
 }
 
+// Append build-time cache-buster to GLB URLs — model-viewer caches
+// by exact URL, so re-rendered GLBs without this would serve stale
+// geometry until the browser hard-reloads twice.
+const BUILD_BUST = `?v=${Date.now()}`;
+
 const cad = parseYaml(cadManifestYaml) as CadManifest;
 const cameras = cad.cameras ?? {};
 const cardModels = cad.models.map((m) => ({
   ...m,
+  glb: m.glb + BUILD_BUST,
   cameraOrbit: cameras[m.camera ?? "iso"] ?? cameras.iso,
 }));
+const substrateCards = cardModels.filter((m) => m.type !== "vitamin");
+const cadVitaminCards = cardModels.filter((m) => m.type === "vitamin");
 
 // KiCad manifest — populated by hand as .kicad_pcb files land; the
 // prebuild script (bin/prebuild-kicad) stages matching GLB + iso PNG
@@ -104,13 +116,23 @@ const placements: Placement[] = Object.values(placementYamls).map(
     <header class="header">
       <h1>3dPCB-paper gallery</h1>
       <div class="header-status">
-        <span class="build-status">{cardModels.length} AnchorSCAD part(s)</span>
+        <span class="build-status">{substrateCards.length} substrate part(s) · {cadVitaminCards.length + vitaminCards.length} vitamin(s)</span>
       </div>
     </header>
 
     <main class="content">
+      <!-- Pinned section — populated client-side from localStorage.
+           Hidden when empty; cards are cloned in from the sections below. -->
+      <section class="model-group" id="pinned-section" hidden>
+        <div class="model-group-header">
+          <h2>Pinned</h2>
+          <span class="muted">stored locally in this browser</span>
+        </div>
+        <div class="screenshot-grid large" id="pinned-grid"></div>
+      </section>
+
       {
-        cardModels.length === 0 ? (
+        substrateCards.length === 0 ? (
           <div class="empty-state">
             <h2>No models yet</h2>
             <p>
@@ -121,11 +143,11 @@ const placements: Placement[] = Object.values(placementYamls).map(
         ) : (
           <section class="model-group">
             <div class="model-group-header">
-              <h2>AnchorSCAD ({cad.project})</h2>
+              <h2>AnchorSCAD substrate ({cad.project})</h2>
             </div>
-            <div class="screenshot-grid">
-              {cardModels.map((m) => (
-                <article class="screenshot-card">
+            <div class="screenshot-grid large">
+              {substrateCards.map((m) => (
+                <article class="screenshot-card" data-pin-id={`cad/${m.name}`} data-pin-label={m.name}>
                   <a class="screenshot-card-link" href={`/model/cad/${m.name}/`}>
                     <model-viewer
                       src={m.glb}
@@ -141,6 +163,56 @@ const placements: Placement[] = Object.values(placementYamls).map(
                       <span>{m.name}</span>
                     </div>
                   </a>
+                  <div class="card-controls">
+                    <button type="button" class="ctrl-pin" data-action="pin" title="Pin to top">☆</button>
+                    <button type="button" class="ctrl-rotate" data-action="autorotate" title="Toggle auto-rotate">⟳</button>
+                  </div>
+                  <div class="card-downloads">
+                    <a href={`/models/cad/${m.name}.stl`} download>STL</a>
+                    <span class="dot">·</span>
+                    <button
+                      type="button"
+                      data-open-tool="openscad"
+                      data-open-name={m.name}
+                      title="Launch OpenSCAD on the server with this file"
+                    >Open SCAD</button>
+                  </div>
+                </article>
+              ))}
+            </div>
+          </section>
+        )
+      }
+
+      {
+        cadVitaminCards.length > 0 && (
+          <section class="model-group">
+            <div class="model-group-header">
+              <h2>AnchorSCAD vitamins</h2>
+              <span class="muted">COTS approximations built in Python</span>
+            </div>
+            <div class="screenshot-grid">
+              {cadVitaminCards.map((m) => (
+                <article class="screenshot-card" data-pin-id={`cad/${m.name}`} data-pin-label={m.name}>
+                  <a class="screenshot-card-link" href={`/model/cad/${m.name}/`}>
+                    <model-viewer
+                      src={m.glb}
+                      camera-controls
+                      auto-rotate
+                      camera-orbit={m.cameraOrbit}
+                      shadow-intensity="1"
+                      exposure="0.9"
+                      alt={m.name}
+                    />
+                    <div class="card-footer">
+                      <span class="angle-label">vitamin</span>
+                      <span>{m.name}</span>
+                    </div>
+                  </a>
+                  <div class="card-controls">
+                    <button type="button" class="ctrl-pin" data-action="pin" title="Pin to top">☆</button>
+                    <button type="button" class="ctrl-rotate" data-action="autorotate" title="Toggle auto-rotate">⟳</button>
+                  </div>
                   <div class="card-downloads">
                     <a href={`/models/cad/${m.name}.stl`} download>STL</a>
                     <span class="dot">·</span>
@@ -206,20 +278,23 @@ const placements: Placement[] = Object.values(placementYamls).map(
                 // their own STL.
                 const pcbBase = m.name.replace(/-assembly$/, "");
                 return (
-                  <article class="screenshot-card">
+                  <article class="screenshot-card" data-pin-id={`kicad/${m.name}`} data-pin-label={m.label ?? m.name}>
                     <a class="screenshot-card-link" href={`/model/kicad/${m.name}/`}>
                       <model-viewer
-                        src={`/models/kicad/${m.name}.glb`}
+                        src={`/models/kicad/${m.name}.glb${BUILD_BUST}`}
                         alt={m.label ?? m.name}
                         camera-controls
                         auto-rotate
-                        style="width: 100%; height: 320px;"
                       />
                       <div class="card-footer">
                         <span class="angle-label">kicad</span>
                         <span>{m.label ?? m.name}</span>
                       </div>
                     </a>
+                    <div class="card-controls">
+                      <button type="button" class="ctrl-pin" data-action="pin" title="Pin to top">☆</button>
+                      <button type="button" class="ctrl-rotate" data-action="autorotate" title="Toggle auto-rotate">⟳</button>
+                    </div>
                     <div class="card-downloads">
                       <a href={`/models/kicad/${m.name}.stl`} download>STL</a>
                       <span class="dot">·</span>
@@ -242,7 +317,8 @@ const placements: Placement[] = Object.values(placementYamls).map(
       <!-- Third-party vitamins gallery section -->
       <section class="model-group gallery vitamins">
         <div class="model-group-header">
-          <h2>Third-party 3D models</h2>
+          <h2>Vitamins / COTS</h2>
+          <span class="muted">upstream STEP from vendors</span>
         </div>
         {
           vitaminCards.length === 0 ? (
@@ -252,20 +328,23 @@ const placements: Placement[] = Object.values(placementYamls).map(
           ) : (
             <div class="screenshot-grid">
               {vitaminCards.map((m) => (
-                <article class="screenshot-card">
+                <article class="screenshot-card" data-pin-id={`vitamin/${m.name}`} data-pin-label={m.label ?? m.name}>
                   <model-viewer
-                    src={`/models/vitamins/${m.name}.glb`}
+                    src={`/models/vitamins/${m.name}.glb${BUILD_BUST}`}
                     alt={m.label ?? m.name}
                     camera-controls
                     auto-rotate
                     camera-orbit={m.cameraOrbit}
                     shadow-intensity="1"
                     exposure="0.9"
-                    style="width: 100%; height: 320px;"
                   />
                   <div class="card-footer">
                     <span class="angle-label">vitamin</span>
                     <span>{m.label ?? m.name}</span>
+                  </div>
+                  <div class="card-controls">
+                    <button type="button" class="ctrl-pin" data-action="pin" title="Pin to top">☆</button>
+                    <button type="button" class="ctrl-rotate" data-action="autorotate" title="Toggle auto-rotate">⟳</button>
                   </div>
                   <div class="card-downloads">
                     <a href={`/models/vitamins/${m.sourceBasename}`} download>STEP</a>
@@ -320,6 +399,136 @@ const placements: Placement[] = Object.values(placementYamls).map(
           btn.disabled = false;
         }, 1500);
       });
+    </script>
+
+    <script is:inline>
+      // Pinning + per-card auto-rotate, both persisted in localStorage.
+      //
+      // PIN_KEY stores a JSON array of pin-ids (matches data-pin-id on
+      // each .screenshot-card). When a card is pinned, we clone it into
+      // #pinned-grid at the top of the page and add .is-pinned-source
+      // to the original so the user knows where it came from.
+      //
+      // ROTATE_KEY stores { [pinId]: false } — only "off" overrides are
+      // persisted; absence means default-on (matches the markup).
+      const PIN_KEY = "gallery:pinned";
+      const ROTATE_KEY = "gallery:autorotate";
+
+      const loadJSON = (k, fallback) => {
+        try { return JSON.parse(localStorage.getItem(k) ?? "") ?? fallback; }
+        catch { return fallback; }
+      };
+      const saveJSON = (k, v) => localStorage.setItem(k, JSON.stringify(v));
+
+      let pinned = loadJSON(PIN_KEY, []);
+      const rotateOverrides = loadJSON(ROTATE_KEY, {});
+
+      const pinnedSection = document.getElementById("pinned-section");
+      const pinnedGrid = document.getElementById("pinned-grid");
+
+      function applyAutoRotate(card, pinId) {
+        const off = rotateOverrides[pinId] === false;
+        const mv = card.querySelector("model-viewer");
+        if (mv) {
+          if (off) mv.removeAttribute("auto-rotate");
+          else mv.setAttribute("auto-rotate", "");
+        }
+        const btn = card.querySelector('[data-action="autorotate"]');
+        if (btn) btn.classList.toggle("is-off", off);
+      }
+
+      function refreshPinned() {
+        pinnedGrid.innerHTML = "";
+        document.querySelectorAll(".screenshot-card[data-pin-id]").forEach((c) => {
+          c.classList.remove("is-pinned-source");
+        });
+        if (pinned.length === 0) {
+          pinnedSection.hidden = true;
+          return;
+        }
+        pinnedSection.hidden = false;
+        pinned.forEach((pinId) => {
+          const source = document.querySelector(
+            `.screenshot-card[data-pin-id="${CSS.escape(pinId)}"]:not(.pinned-clone)`,
+          );
+          if (!source) return;
+          source.classList.add("is-pinned-source");
+          const clone = source.cloneNode(true);
+          clone.classList.add("pinned-clone");
+          pinnedGrid.appendChild(clone);
+          applyAutoRotate(clone, pinId);
+          // Mark its pin button so the user sees it's already pinned.
+          const pinBtn = clone.querySelector('[data-action="pin"]');
+          if (pinBtn) {
+            pinBtn.textContent = "★";
+            pinBtn.classList.add("is-pinned");
+          }
+        });
+        // Refresh the source-card pin buttons too.
+        document.querySelectorAll('.screenshot-card[data-pin-id]:not(.pinned-clone)').forEach((c) => {
+          const pinBtn = c.querySelector('[data-action="pin"]');
+          if (!pinBtn) return;
+          const isPinned = pinned.includes(c.dataset.pinId);
+          pinBtn.textContent = isPinned ? "★" : "☆";
+          pinBtn.classList.toggle("is-pinned", isPinned);
+        });
+      }
+
+      // Apply persisted auto-rotate state to every original card on first paint.
+      document.querySelectorAll(".screenshot-card[data-pin-id]").forEach((c) => {
+        applyAutoRotate(c, c.dataset.pinId);
+      });
+
+      refreshPinned();
+
+      document.addEventListener("click", (ev) => {
+        const btn = ev.target?.closest?.("button[data-action]");
+        if (!btn) return;
+        const card = btn.closest(".screenshot-card");
+        if (!card) return;
+        const pinId = card.dataset.pinId;
+        if (!pinId) return;
+
+        if (btn.dataset.action === "pin") {
+          ev.preventDefault();
+          const idx = pinned.indexOf(pinId);
+          if (idx >= 0) pinned.splice(idx, 1);
+          else pinned.push(pinId);
+          saveJSON(PIN_KEY, pinned);
+          refreshPinned();
+        } else if (btn.dataset.action === "autorotate") {
+          ev.preventDefault();
+          const currentOff = rotateOverrides[pinId] === false;
+          if (currentOff) delete rotateOverrides[pinId];
+          else rotateOverrides[pinId] = false;
+          saveJSON(ROTATE_KEY, rotateOverrides);
+          // Apply to every card with this pin-id (source + clone).
+          document
+            .querySelectorAll(`.screenshot-card[data-pin-id="${CSS.escape(pinId)}"]`)
+            .forEach((c) => applyAutoRotate(c, pinId));
+        }
+      });
+    </script>
+
+    <script type="module">
+      // Task 2 / live refresh: when the dev plugin pushes a glb-changed
+      // event for any model on the page, swap that <model-viewer>'s src
+      // (with a fresh ?t=<mtime>) so model-viewer re-fetches the GLB.
+      // The pinned-cards section holds cloned <model-viewer> nodes too,
+      // so we update every match (querySelectorAll).
+      if (import.meta.hot) {
+        import.meta.hot.on("glb-changed", (data) => {
+          if (!data || !data.path) return;
+          document.querySelectorAll("model-viewer").forEach((mv) => {
+            const src = mv.getAttribute("src");
+            if (!src) return;
+            const base = src.split("?")[0];
+            if (base !== data.path) return;
+            const t = data.mtime || Date.now();
+            mv.setAttribute("src", `${base}?t=${t}`);
+          });
+        });
+      }
     </script>
   </body>
 </html>

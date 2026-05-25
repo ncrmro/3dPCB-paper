@@ -103,7 +103,7 @@ def _ground_grid(extent: float, divisions: int = 20) -> trimesh.Trimesh:
     )
 
 
-def _bake(path: Path, axis_scale: float, grid_y_offset: float) -> int:
+def _bake(path: Path, axis_scale: float, grid_y_offset: float, with_grid: bool) -> int:
     g = trimesh.load(str(path))
     if isinstance(g, trimesh.Scene):
         scene = g
@@ -112,10 +112,29 @@ def _bake(path: Path, axis_scale: float, grid_y_offset: float) -> int:
         scene.add_geometry(g)
 
     # Drop any axis/grid nodes from a previous bake so reruns don't
-    # stack duplicates. Names are stable per this script.
-    for stale in ("axis_x", "axis_y", "axis_z", "ground_grid"):
-        if stale in scene.geometry:
-            scene.delete_geometry(stale)
+    # stack duplicates. CRITICAL: trimesh's GLB export renames every
+    # node to "geometry_N", so the original names from the prior bake
+    # are gone — we identify stale markers by their uniform face color
+    # instead. The RGB triples here MUST stay in sync with the colors
+    # passed to add_geometry() below.
+    _MARKER_RGB = {
+        (220, 60, 60),    # axis_x
+        (60, 200, 60),    # axis_y
+        (60, 90, 220),    # axis_z
+        (220, 220, 220),  # ground_grid light
+        (180, 180, 190),  # ground_grid dark
+    }
+    for name in list(scene.geometry.keys()):
+        if name in ("axis_x", "axis_y", "axis_z", "ground_grid"):
+            scene.delete_geometry(name)
+            continue
+        mesh = scene.geometry[name]
+        colors = getattr(mesh.visual, "face_colors", None)
+        if colors is None or len(colors) == 0:
+            continue
+        unique = {tuple(c[:3]) for c in colors}
+        if unique and unique.issubset(_MARKER_RGB):
+            scene.delete_geometry(name)
 
     # Size axes from the model's bbox — works whether the GLB is in
     # metres (KiCad output) or millimetres (AnchorSCAD).
@@ -152,10 +171,11 @@ def _bake(path: Path, axis_scale: float, grid_y_offset: float) -> int:
         _at_anchor(_axis_cylinder("z", extent, (60, 90, 220, 255))),
         node_name="axis_z",
     )
-    scene.add_geometry(
-        _at_anchor(_ground_grid(extent=extent, divisions=20)),
-        node_name="ground_grid",
-    )
+    if with_grid:
+        scene.add_geometry(
+            _at_anchor(_ground_grid(extent=extent, divisions=20)),
+            node_name="ground_grid",
+        )
 
     scene.export(str(path))
     return path.stat().st_size
@@ -178,13 +198,28 @@ def main() -> int:
         help="add this offset to the grid Y position (model units). "
         "Negative values push the grid below the model.",
     )
+    # Off by default — the ground grid occludes the underside of the
+    # model in <model-viewer>'s orbit controls. Axes alone give enough
+    # coordinate reference; opt in with --grid when the floor is wanted.
+    parser.add_argument(
+        "--grid",
+        dest="with_grid",
+        action="store_true",
+        default=False,
+        help="also bake the ground grid (default: axes only)",
+    )
     args = parser.parse_args()
 
     for p in args.paths:
         if not p.exists():
             print(f"skip {p}: not found", file=sys.stderr)
             continue
-        size = _bake(p, axis_scale=args.axis_scale, grid_y_offset=args.grid_y_offset)
+        size = _bake(
+            p,
+            axis_scale=args.axis_scale,
+            grid_y_offset=args.grid_y_offset,
+            with_grid=args.with_grid,
+        )
         print(f"axes baked into {p} ({size:,} bytes)")
     return 0
 

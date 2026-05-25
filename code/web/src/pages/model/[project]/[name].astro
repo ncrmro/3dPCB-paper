@@ -13,6 +13,53 @@ import { parse as parseYaml } from "yaml";
 import cadManifestYaml from "../../../manifest.cad.yaml?raw";
 import kicadManifestYaml from "../../../manifest.kicad.yaml?raw";
 
+// Pre-computed per-substrate reports written by
+// `code/cad/bin/substrate-report` during the prebuild step. Indexed
+// by the substrate's snake-case stem (same as the manifest entry
+// name and the GLB stem), so the focus page can resolve a model →
+// its report by file name. Spec YAMLs are inlined the same way so
+// the editor textarea can render the source without a fetch.
+const reportFiles = import.meta.glob<string>("../../../reports/*.json", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+const specFiles = import.meta.glob<string>("../../../../../cad/specs/*.yaml", {
+  query: "?raw",
+  import: "default",
+  eager: true,
+});
+
+interface HoleRow {
+  name: string;
+  x: number;
+  y: number;
+  diameter: number;
+}
+interface InvariantResult {
+  key: string;
+  label: string;
+  passed: boolean;
+  message: string;
+}
+interface ScoreBreakdown {
+  total_length_mm: number;
+  l1_length_mm: number;
+  l2_length_mm: number;
+  via_count: number;
+  edge_clearance_min_mm: number;
+  pedestal_underside_mm: number;
+  aggregate: number;
+}
+interface SubstrateReport {
+  name: string;
+  class: string;
+  spec_path: string | null;
+  score: ScoreBreakdown;
+  invariants: InvariantResult[];
+  holes: HoleRow[];
+}
+
 interface CadModel {
   name: string;
   glb: string;
@@ -54,20 +101,54 @@ interface FocusProps {
 }
 const { model, project } = Astro.props as FocusProps;
 
+// Append a build-time cache-buster to GLB URLs so model-viewer's
+// internal cache can't serve a stale GLB after a re-render. The
+// timestamp changes every time Astro rebuilds (dev: every HMR; prod:
+// per build), which is fine for our use — the underlying file is
+// behind the same /public/ URL, the query string is ignored by the
+// static-asset handler but invalidates the browser-side cache key.
+const BUILD_BUST = `?v=${Date.now()}`;
+
 // Resolve the focused asset URLs + camera by project.
 let focusedGlb: string;
 let focusedCameraOrbit: string;
 let focusedLabel: string;
 let focusedImg: string | null = null;
 
+// Optional per-substrate report (Task 1) + optional source YAML
+// (Task 3). Both lookups are best-effort — missing files render an
+// empty section / "not editable" placeholder rather than 500ing.
+let report: SubstrateReport | null = null;
+let specYamlText: string | null = null;
+let specYamlStem: string | null = null;
+
 if (project === "cad") {
   const m = model as CadModel;
-  focusedGlb = m.glb;
+  focusedGlb = m.glb + BUILD_BUST;
   focusedCameraOrbit = cadCameras[m.camera ?? "iso"] ?? cadCameras.iso ?? "55deg 75deg 200mm";
   focusedLabel = m.name;
+  const reportKey = `../../../reports/${m.name}.json`;
+  const raw = reportFiles[reportKey];
+  if (raw) {
+    try {
+      report = JSON.parse(raw) as SubstrateReport;
+    } catch {
+      report = null;
+    }
+  }
+  if (report?.spec_path) {
+    // spec_path is relative to code/cad/ (e.g. "specs/tier2_compact.yaml").
+    // import.meta.glob keys are relative to this file.
+    const stem = report.spec_path.replace(/^specs\//, "").replace(/\.yaml$/, "");
+    const yamlKey = `../../../../../cad/specs/${stem}.yaml`;
+    if (specFiles[yamlKey]) {
+      specYamlText = specFiles[yamlKey];
+      specYamlStem = stem;
+    }
+  }
 } else {
   const m = model as KicadModel;
-  focusedGlb = `/models/kicad/${m.name}.glb`;
+  focusedGlb = `/models/kicad/${m.name}.glb${BUILD_BUST}`;
   focusedCameraOrbit =
     kicadCameras[m.camera ?? "iso"] ?? kicadCameras.iso ?? "55deg 75deg 200mm";
   focusedLabel = m.label ?? m.name;
@@ -77,12 +158,6 @@ if (project === "cad") {
   focusedImg = `/models/kicad/${m.name}-iso.png`;
 }
 
-// Card models for the gallery strip below the focus panel.
-const cadCards = cad.models.map((m) => ({
-  ...m,
-  cameraOrbit: cadCameras[m.camera ?? "iso"] ?? cadCameras.iso,
-}));
-const kicadCards = kicad.models;
 ---
 
 <!doctype html>
@@ -108,6 +183,7 @@ const kicadCards = kicad.models;
       <section class="focus-slot">
         <div class="focus-pane">
           <model-viewer
+            id="focus-viewer"
             src={focusedGlb}
             camera-controls
             auto-rotate
@@ -115,8 +191,14 @@ const kicadCards = kicad.models;
             shadow-intensity="1"
             exposure="0.9"
             alt={focusedLabel}
-            style="width: 100%; height: 560px;"
+            style="width: 100%; height: min(85vh, 900px); min-height: 560px;"
           />
+          <button
+            id="focus-rotate-toggle"
+            type="button"
+            class="focus-rotate-btn"
+            aria-label="Pause rotation"
+          >⏸</button>
         </div>
         {
           focusedImg && (
@@ -169,6 +251,171 @@ const kicadCards = kicad.models;
         )}
       </section>
 
+      {project === "cad" && report && (
+        <section class="substrate-report" aria-labelledby="report-heading">
+          <h2 id="report-heading">Routing report</h2>
+          <div class="report-grid">
+            <div class="report-block">
+              <h3>Scoring breakdown</h3>
+              <dl class="report-dl">
+                <dt>Total length</dt><dd>{report.score.total_length_mm.toFixed(2)} mm</dd>
+                <dt>L1 length</dt><dd>{report.score.l1_length_mm.toFixed(2)} mm</dd>
+                <dt>L2 length</dt><dd>{report.score.l2_length_mm.toFixed(2)} mm</dd>
+                <dt>Via count</dt><dd>{report.score.via_count}</dd>
+                <dt>Min edge clearance</dt><dd>{report.score.edge_clearance_min_mm.toFixed(2)} mm</dd>
+                <dt>Pedestal-underside L1</dt><dd>{report.score.pedestal_underside_mm.toFixed(2)} mm</dd>
+                <dt>Aggregate score</dt><dd><strong>{report.score.aggregate.toFixed(1)}</strong> <span class="muted">(lower is better)</span></dd>
+              </dl>
+            </div>
+            <div class="report-block">
+              <h3>Routing invariants</h3>
+              <ul class="report-invariants">
+                {report.invariants.map((inv) => (
+                  <li class={inv.passed ? "inv-pass" : "inv-fail"}>
+                    <span class="inv-mark" aria-hidden="true">{inv.passed ? "✓" : "✗"}</span>
+                    <span class="inv-label">{inv.label}</span>
+                    <span class="inv-msg">{inv.message}</span>
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <div class="report-block report-holes">
+            <h3>Drilled holes ({report.holes.length})</h3>
+            <table class="report-table">
+              <thead><tr><th>name</th><th>x (mm)</th><th>y (mm)</th><th>⌀ (mm)</th></tr></thead>
+              <tbody>
+                {report.holes.map((h) => (
+                  <tr>
+                    <td>{h.name}</td>
+                    <td>{h.x.toFixed(2)}</td>
+                    <td>{h.y.toFixed(2)}</td>
+                    <td>{h.diameter.toFixed(2)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
+
+      {project === "cad" && !report && (
+        <section class="substrate-report substrate-report-empty">
+          <h2>Routing report</h2>
+          <p class="muted">no routing report available for this model.</p>
+        </section>
+      )}
+
+      {project === "cad" && specYamlText && specYamlStem && (
+        <section class="spec-editor" aria-labelledby="spec-editor-heading">
+          <h2 id="spec-editor-heading">Spec source — <code>specs/{specYamlStem}.yaml</code></h2>
+          <p class="muted">Edit the spec, click Save. The watcher re-renders the GLB and the report updates automatically.</p>
+          <textarea
+            id="spec-editor-textarea"
+            data-spec-name={specYamlStem}
+            spellcheck="false"
+            rows="24"
+          >{specYamlText}</textarea>
+          <div class="spec-editor-actions">
+            <button id="spec-save-btn" type="button" class="dl-btn">Save</button>
+            <span id="spec-save-status" class="muted"></span>
+          </div>
+        </section>
+      )}
+
+      {project === "cad" && report && !specYamlText && (
+        <section class="spec-editor spec-editor-disabled">
+          <h2>Spec source</h2>
+          <p class="muted">not editable — hand-coded class (<code>{report.class}</code>).</p>
+        </section>
+      )}
+
+      <script is:inline>
+        // POST the edited YAML to /api/save-spec. The endpoint validates
+        // the resolved path stays under code/cad/specs/ and writes
+        // atomically; the watcher (process-compose watch-cad) picks up
+        // the change and rebuilds the GLB.
+        (function () {
+          const ta = document.getElementById("spec-editor-textarea");
+          const btn = document.getElementById("spec-save-btn");
+          const status = document.getElementById("spec-save-status");
+          if (!ta || !btn || !status) return;
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            status.textContent = "saving…";
+            try {
+              const res = await fetch("/api/save-spec", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({
+                  name: ta.dataset.specName,
+                  yaml: ta.value,
+                }),
+              });
+              const body = await res.json().catch(() => ({}));
+              if (res.ok && body && body.ok) {
+                status.textContent = "saved ✓ — rebuild in progress";
+              } else {
+                status.textContent = "save failed: " + (body && body.error ? body.error : res.statusText);
+              }
+            } catch (e) {
+              status.textContent = "network error: " + e;
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        })();
+      </script>
+
+      <script type="module">
+        // Task 2: hot-reload listener. The dev plugin in astro.config.mjs
+        // watches public/models/cad/ and pushes a `glb-changed` event
+        // with `{ path, mtime }` over Vite's HMR socket whenever a GLB
+        // is rewritten by the watcher. We swap the focus viewer's `src`
+        // to `<path>?t=<mtime>` — model-viewer reloads on src change
+        // and the new mtime invalidates the browser cache key.
+        if (import.meta.hot) {
+          import.meta.hot.on("glb-changed", (data) => {
+            if (!data || !data.path) return;
+            document.querySelectorAll("model-viewer").forEach((mv) => {
+              const src = mv.getAttribute("src");
+              if (!src) return;
+              const base = src.split("?")[0];
+              if (base !== data.path) return;
+              const t = data.mtime || Date.now();
+              mv.setAttribute("src", `${base}?t=${t}`);
+            });
+          });
+          // Reports are inlined at SSR via ?raw; rebuild → file mtime
+          // bumps → ?raw cache miss → we reload to pick up new numbers.
+          import.meta.hot.on("report-changed", () => location.reload());
+        }
+      </script>
+
+      <script is:inline>
+        // Pause / resume the model-viewer's auto-rotate. State persists
+        // in localStorage under the model's URL path so a refresh stays
+        // paused for the same model.
+        (function () {
+          const mv = document.getElementById("focus-viewer");
+          const btn = document.getElementById("focus-rotate-toggle");
+          if (!mv || !btn) return;
+          const key = "gallery:focus-paused:" + location.pathname;
+          const apply = (paused) => {
+            if (paused) mv.removeAttribute("auto-rotate");
+            else mv.setAttribute("auto-rotate", "");
+            btn.textContent = paused ? "▶" : "⏸";
+            btn.setAttribute("aria-label", paused ? "Resume rotation" : "Pause rotation");
+          };
+          apply(localStorage.getItem(key) === "1");
+          btn.addEventListener("click", () => {
+            const next = mv.hasAttribute("auto-rotate");  // currently rotating → pause
+            localStorage.setItem(key, next ? "1" : "0");
+            apply(next);
+          });
+        })();
+      </script>
+
       <script is:inline>
         // CRITICAL: dev-mode wiring for the "Open in …" buttons.
         // POST to /api/open; the server spawns the local app with
@@ -199,78 +446,6 @@ const kicadCards = kicad.models;
         });
       </script>
 
-      <!-- Gallery strip — same cards as `/`, but compact and linking back. -->
-      {
-        cadCards.length > 0 && (
-          <section class="model-group">
-            <div class="model-group-header">
-              <h2>AnchorSCAD ({cad.project})</h2>
-            </div>
-            <div class="screenshot-grid">
-              {cadCards.map((m) => (
-                <a
-                  class={`screenshot-card-link${
-                    project === "cad" && m.name === focusedLabel ? " is-focused" : ""
-                  }`}
-                  href={`/model/cad/${m.name}/`}
-                >
-                  <article class="screenshot-card">
-                    <model-viewer
-                      src={m.glb}
-                      camera-controls
-                      auto-rotate
-                      camera-orbit={m.cameraOrbit}
-                      shadow-intensity="1"
-                      exposure="0.9"
-                      alt={m.name}
-                    />
-                    <div class="card-footer">
-                      <span class="angle-label">{cad.project}</span>
-                      <span>{m.name}</span>
-                    </div>
-                  </article>
-                </a>
-              ))}
-            </div>
-          </section>
-        )
-      }
-
-      {
-        kicadCards.length > 0 && (
-          <section class="model-group gallery kicad">
-            <div class="model-group-header">
-              <h2>KiCad</h2>
-            </div>
-            <div class="screenshot-grid">
-              {kicadCards.map((m) => (
-                <a
-                  class={`screenshot-card-link${
-                    project === "kicad" && m.name === (model as KicadModel).name
-                      ? " is-focused"
-                      : ""
-                  }`}
-                  href={`/model/kicad/${m.name}/`}
-                >
-                  <article class="screenshot-card">
-                    <model-viewer
-                      src={`/models/kicad/${m.name}.glb`}
-                      alt={m.label ?? m.name}
-                      camera-controls
-                      auto-rotate
-                      style="width: 100%; height: 320px;"
-                    />
-                    <div class="card-footer">
-                      <span class="angle-label">kicad</span>
-                      <span>{m.label ?? m.name}</span>
-                    </div>
-                  </article>
-                </a>
-              ))}
-            </div>
-          </section>
-        )
-      }
     </main>
   </body>
 </html>

@@ -76,3 +76,20 @@ done
 echo "[prebuild-cad] baking axes into ${#staged[@]} GLB(s)"
 (cd "$CAD_DIR" && nix develop -c "$WEB_DIR/bin/add-axes" "${staged[@]}") \
   || echo "[prebuild-cad] WARN: add-axes failed; cards will render without axes" >&2
+
+# Regenerate the gallery manifest from the staged GLB set — drop a new
+# YAML into code/cad/specs/, run prebuild, and the manifest picks up
+# the new substrate automatically. Non-fatal: a stale manifest still
+# loads, just without the new entry.
+echo "[prebuild-cad] regenerating gallery manifest"
+(cd "$CAD_DIR" && nix develop -c "$WEB_DIR/bin/regen-manifest") \
+  || echo "[prebuild-cad] WARN: regen-manifest failed; manifest unchanged" >&2
+
+# Per-substrate routing reports (scoring + invariants + hole inventory)
+# that the focus page renders. Writes to code/web/src/reports/*.json
+# at build time so the .astro page can ?raw-import them with no
+# request-time work. Non-fatal — the focus page falls back to "no
+# routing report available" when a JSON is missing.
+echo "[prebuild-cad] regenerating substrate reports"
+(cd "$CAD_DIR" && nix develop -c "$CAD_DIR/bin/substrate-report") \
+  || echo "[prebuild-cad] WARN: substrate-report failed; reports unchanged" >&2

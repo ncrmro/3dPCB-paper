@@ -8,13 +8,12 @@
 
 version: "0.5"
 
-# Pinned to Astro's default so the gallery is always at the same
-# URL. Switch back to `shuf -i 10000-60000 -n 1` if you need to run
-# multiple gallery instances on one host. Reference with
-# `$${WEB_PORT}` (double-dollar) so the shell expands at process
-# spawn, not at YAML parse.
+# Random port per launch so multiple gallery instances can coexist on
+# one host. Reference with `$${WEB_PORT}` (double-dollar) so the shell
+# expands at process spawn, not at YAML parse. The `url:` process below
+# prints the resolved port once the readiness probe passes.
 env_cmds:
-  WEB_PORT: "echo 4321"
+  WEB_PORT: "shuf -i 10000-60000 -n 1"
 
 # process-compose's own HTTP API stays on (default :8080) so the
 # dependency graph at http://127.0.0.1:8080/graph and the web TUI
@@ -27,16 +26,22 @@ env_cmds:
 
 processes:
   # ---------------------------------------------------------------
-  # One-shot: stage models before the dev server starts so the first
-  # page load already has GLBs. Both halves of the pipeline run from
-  # their own nix shells so the right toolchain (openscad+assimp for
-  # cad, kicad-cli for kicad) is on PATH.
+  # One-shot CAD stage: required before the dev server starts so the
+  # first page load already has substrate/vitamin GLBs.
   # ---------------------------------------------------------------
-  prebuild:
-    command: |
-      set -e
-      bash code/web/bin/prebuild-cad
-      nix develop ./code/kicad --command bash code/web/bin/prebuild-kicad
+  prebuild-cad:
+    command: bash code/web/bin/prebuild-cad
+    availability:
+      restart: "no"
+
+  # ---------------------------------------------------------------
+  # One-shot KiCad stage: best-effort. Runs in the kicad flake so
+  # kicad-cli is on PATH. Decoupled from `web` so a board-load failure
+  # (e.g. pre-existing project state) doesn't keep the gallery down —
+  # the previously-staged spike.glb / iso PNG remain usable.
+  # ---------------------------------------------------------------
+  prebuild-kicad:
+    command: nix develop ./code/kicad --command bash code/web/bin/prebuild-kicad
     availability:
       restart: "no"
 
@@ -59,11 +64,11 @@ processes:
   # ---------------------------------------------------------------
   web:
     working_dir: code/web
-    command: nix develop --command bun run dev -- --port $${WEB_PORT} --host 127.0.0.1
+    command: nix develop --command bun run dev -- --port $${WEB_PORT} --host 0.0.0.0
     depends_on:
       web-deps:
         condition: process_completed_successfully
-      prebuild:
+      prebuild-cad:
         condition: process_completed_successfully
     availability:
       restart: on_failure
