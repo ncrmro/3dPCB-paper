@@ -27,29 +27,14 @@ models:
 - name: receptacle_test_coupon
   glb: /models/cad/receptacle_test_coupon.glb
   camera: top
-- name: substrate_tier2_climb_at_minus_seven
-  glb: /models/cad/substrate_tier2_climb_at_minus_seven.glb
+- name: substrate_i2c_midline_sensors
+  glb: /models/cad/substrate_i2c_midline_sensors.glb
   camera: top
-- name: substrate_tier2_compact
-  glb: /models/cad/substrate_tier2_compact.glb
+- name: substrate_i2c_sensors_flipped
+  glb: /models/cad/substrate_i2c_sensors_flipped.glb
   camera: top
-- name: substrate_tier2_highway_at_fifteen
-  glb: /models/cad/substrate_tier2_highway_at_fifteen.glb
-  camera: top
-- name: tier1_substrate
-  glb: /models/cad/tier1_substrate.glb
-  camera: top
-- name: tier2_substrate
-  glb: /models/cad/tier2_substrate.glb
-  camera: top
-- name: tier2_substrate_bundled
-  glb: /models/cad/tier2_substrate_bundled.glb
-  camera: top
-- name: tier2_substrate_from_spec
-  glb: /models/cad/tier2_substrate_from_spec.glb
-  camera: top
-- name: tier2_substrate_option2
-  glb: /models/cad/tier2_substrate_option2.glb
+- name: substrate_i2c_starter
+  glb: /models/cad/substrate_i2c_starter.glb
   camera: top
 - name: esp32_c3_assembly
   glb: /models/cad/esp32_c3_assembly.glb

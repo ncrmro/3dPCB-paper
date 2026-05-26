@@ -1,4 +1,4 @@
-"""Pytest path config so `from netlist import ...` works from tests."""
+"""Pytest path config so `from board import ...` works from tests."""
 
 import os
 import sys

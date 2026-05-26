@@ -1,13 +1,54 @@
 # 3dPCB-paper
 
-A research paper and spike CAD for **parametric 3D-printed substrates
-that unify PCB layout, harness routing, and enclosure into one
-declarative artifact**. A fabricated PCB and a 3D-printed substrate
-are sibling physical embodiments of the same KiCad netlist — not
-successors.
+**3dPCB-paper turns a few lines of YAML — "an ESP32, an SCD41, a
+BH1750, all on I²C" — into a 3D-printable substrate with the bus
+auto-routed and a 3D-printable enclosure designed around it.** The
+goal is a succinct declarative format for iterating on PCBs that are
+*cast as plastic* rather than etched on copper: edit the spec,
+re-render, ship a new board in an hour, drop it into the printed
+housing the same day.
+
+Devices are first-class primitives — microcontrollers and sensors
+that expose standard pin groups (I²C, UART, GPIO, power). Buses
+connect them. The router places wires to minimise length, vias, and
+same-layer crossings while respecting printable wall floors.
+Everything geometric (board outline, pockets, channels, holes) is
+*derived* from the device + bus declaration. Nothing about the
+geometry — including the OLED display, sensor breakouts, or ESP32
+carrier — is hardcoded in Python beyond the physical dimensions of
+the parts themselves.
+
+A fabricated PCB and a 3D-printed substrate are sibling physical
+embodiments of the same netlist — not successors.
 
 Demonstration target: ESP32-C3 Supermini + Sensirion SCD41 + Rohm
-BH1750 on a shared I2C bus (SDA=GPIO5, SCL=GPIO6).
+BH1750 on a shared I²C bus (SDA=GPIO5, SCL=GPIO6).
+
+## Authoring a new board
+
+```yaml
+# code/cad/specs/i2c_starter.yaml
+name: i2c_starter
+levels:
+  - name: base
+    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    z_start: -1.5
+    z_end: 1.5
+devices:
+  - { name: u1,     device: esp32_c3_supermini, position: { x: -21, y: -7 } }
+  - { name: scd41,  device: scd41,              position: { x:   9, y: -6 } }
+  - { name: bh1750, device: bh1750,             position: { x:  25, y: -8 } }
+  - name: oled
+    device: oled_ssd1306
+    position: { x: 0, y: 10 }
+    header: { connector: female_1x4_2.54 }
+buses:
+  - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750, oled] }
+```
+
+Drop a YAML in `code/cad/specs/`, run `nix develop ./code/cad -c bash
+code/web/bin/prebuild-cad`, open the gallery — the new board renders
+with the bus auto-routed.
 
 ## Layout
 

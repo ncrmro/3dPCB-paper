@@ -5,11 +5,6 @@ from anchorscad import datatree
 from dataclasses import field
 from typing import List, Tuple
 
-# Re-export PINOUTs (canonical source: `esp32_pinout.py` — a pure-data
-# sibling that doesn't pull anchorscad, so the KiCad flake can also
-# import them).
-from vitamins.esp32_pinout import J1A_PINOUT, J1B_PINOUT  # noqa: F401
-
 from registry import register_part
 
 

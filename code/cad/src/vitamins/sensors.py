@@ -5,11 +5,6 @@ from anchorscad import datatree
 from dataclasses import field
 from typing import Tuple
 
-# Re-export PINOUTs (canonical source: `sensors_pinout.py` — a pure-data
-# sibling that doesn't pull anchorscad, so the KiCad flake can also
-# import them).
-from vitamins.sensors_pinout import BH1750_PINOUT, SCD41_PINOUT  # noqa: F401
-
 
 @datatree
 class Scd41Dimensions:

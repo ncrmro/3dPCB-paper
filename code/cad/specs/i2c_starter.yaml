@@ -1,0 +1,29 @@
+name: i2c_starter
+
+# Base plate only — the OLED's pedestal is auto-generated from its
+# `header:` declaration, not described here as a separate level.
+levels:
+  - name: base
+    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    z_start: -1.5
+    z_end: 1.5
+
+# Devices: pick from DEVICE_REGISTRY by `device:` key, place by the
+# device's reference point (= PCB centre for flat-mounted devices,
+# header pin-row centre for the OLED). `header:` makes the OLED sit on
+# a standard 4-pin female header; the builder synthesises the pedestal
+# geometry from the connector's body footprint.
+devices:
+  - { name: u1,     device: esp32_c3_supermini, position: { x: -21, y: -7 } }
+  - { name: scd41,  device: scd41,              position: { x:  9,  y: -6 } }
+  - { name: bh1750, device: bh1750,             position: { x: 25,  y: -8 } }
+  - name: oled
+    device: oled_ssd1306
+    position: { x: 0, y: 10 }
+    header: { connector: female_1x4_2.54 }
+
+# I²C bus auto-resolves to four nets (VCC, GND, SCL, SDA). The router
+# computes channels + vias from device + bus declarations alone — no
+# hand-listed waypoints.
+buses:
+  - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750, oled] }

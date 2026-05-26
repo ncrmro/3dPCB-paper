@@ -39,6 +39,7 @@ sys.modules["OpenGL.GL"] = MagicMock()
 import anchorscad as ad  # noqa: E402
 import registry  # noqa: E402
 import vitamins  # noqa: E402
+import board  # noqa: E402 — populates DEVICE_REGISTRY + per-spec Shape classes
 
 
 def _walk(package):
@@ -138,6 +139,10 @@ def main() -> int:
 
     for mod in _walk(vitamins):
         registry.auto_register_module(mod, part_type="vitamin")
+    # Register the per-spec Board_<name> shapes that board.spec_discovery
+    # synthesised at import time. They live on the spec_discovery module
+    # so its name walks them like any other AnchorSCAD shape source.
+    registry.auto_register_module(board.spec_discovery, part_type="substrate")
 
     have_openscad = shutil.which("openscad") is not None
     if not have_openscad:

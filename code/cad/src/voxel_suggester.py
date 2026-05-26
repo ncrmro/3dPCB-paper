@@ -33,14 +33,7 @@ import math
 from dataclasses import dataclass
 from typing import Iterable
 
-from vitamins.substrate import (
-    Point2D,
-    SignalPath,
-    Tier1Substrate,
-    Tier2Substrate,
-    Tier2SubstrateBundled,
-    WireSegment,
-)
+from vitamins.substrate import Point2D, SignalPath, WireSegment
 from voxel_grid import (
     voxels_in_pcb_footprint_l2,
     voxels_in_segment,
@@ -445,20 +438,8 @@ def emit_markdown_report(sub_cls_name: str, suggestions: list[ChamferSuggestion]
     return "\n".join(lines)
 
 
-def main() -> int:
-    classes = [Tier1Substrate, Tier2Substrate, Tier2SubstrateBundled]
-    print("# Routing chamfer suggestions\n")
-    print("Advisory pass — none of these are required. Each suggestion")
-    print("replaces an axis-aligned L-bend in a routed path with a")
-    print("single 45° diagonal that still satisfies the printable wall")
-    print("buffer (failure mode #7 in `.deepwork/jobs/printable_pcb/job.yml`).")
-    print()
-    for cls in classes:
-        sub = cls()
-        suggestions = find_chamfer_suggestions(sub)
-        print(emit_markdown_report(cls.__name__, suggestions))
-    return 0
-
-
-if __name__ == "__main__":
-    raise SystemExit(main())
+# CLI removed with the legacy substrate classes — `apply_chamfers` /
+# `find_chamfer_suggestions` are kept as library functions so the
+# autorouter (or a future user) can call them. To restore the CLI,
+# port `main()` to walk `code/cad/specs/` and call `route_board` on
+# each Board, then run `find_chamfer_suggestions` on the result.

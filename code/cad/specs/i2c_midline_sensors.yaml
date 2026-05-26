@@ -1,0 +1,32 @@
+name: i2c_midline_sensors
+
+# Sensor pin rows aligned to the board midline (y = 0). SCD41 + BH1750
+# are rotated 180° so their PCBs cantilever SOUTH of the pin row,
+# clearing the OLED's pedestal in the north half. Positions are picked
+# so the pin row centre lands exactly on y = 0:
+#
+#   - SCD41 pin row at device-local y = +9.605 (after 180° flip from
+#     the canonical −9.605), so position.y = −9.605 lands it on 0.
+#   - BH1750 pin row at device-local y = +8.00 (after 180° flip from
+#     −8.00), so position.y = −8.0 lands it on 0.
+#
+# This gives the router a longer master→slave corridor (ESP32 SCL/SDA
+# at y ≈ −15 versus pins at y = 0) but a cleaner south band for L2
+# routing under the sensors.
+levels:
+  - name: base
+    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    z_start: -1.5
+    z_end: 1.5
+
+devices:
+  - { name: u1, device: esp32_c3_supermini, position: { x: -21, y: -7 } }
+  - { name: scd41,  device: scd41,  position: { x:  9, y: -9.6 }, rotation: 180 }
+  - { name: bh1750, device: bh1750, position: { x: 25, y: -8 },   rotation: 180 }
+  - name: oled
+    device: oled_ssd1306
+    position: { x: 0, y: 10 }
+    header: { connector: female_1x4_2.54 }
+
+buses:
+  - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750, oled] }

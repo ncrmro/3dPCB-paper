@@ -1,0 +1,25 @@
+name: i2c_sensors_flipped
+
+# Same starter layout, but the SCD41 and BH1750 are rotated 180° —
+# pin rows now sit on the NORTH side of each sensor PCB (with the PCB
+# bodies cantilevering south of the pins). Positions are nudged south
+# so the rotated bodies still fit on the plate. The router has to
+# climb north to reach the new pin-row y instead of staying near the
+# southern edge.
+levels:
+  - name: base
+    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    z_start: -1.5
+    z_end: 1.5
+
+devices:
+  - { name: u1, device: esp32_c3_supermini, position: { x: -21, y: -7 } }
+  - { name: scd41,  device: scd41,  position: { x:  9, y: -4 }, rotation: 180 }
+  - { name: bh1750, device: bh1750, position: { x: 25, y: -6 }, rotation: 180 }
+  - name: oled
+    device: oled_ssd1306
+    position: { x: 0, y: 10 }
+    header: { connector: female_1x4_2.54 }
+
+buses:
+  - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750, oled] }
