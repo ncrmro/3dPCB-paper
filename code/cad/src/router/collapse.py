@@ -1,12 +1,17 @@
-"""Cell-list post-processing: collapse axis-aligned staircases into 45°
-diagonals, then fold runs of unit cells into Waypoints at corners and
-layer changes.
+"""Cell-list post-processing: simplify tortuous wiggles to clean
+L-bends, collapse cardinal staircases into 45° diagonals, then fold
+runs of unit cells into Waypoints at corners and layer changes.
 
-`_collapse_quadrant_runs` is called by `route_board` as a post-route
-global pass — every path has been halo-blocked by then, so the
-forbidden_check accurately reflects the final occupancy and the
-collapse for any one path can't carve into a corridor reserved for a
-later net.
+Both `_simplify_wiggles` and `_collapse_quadrant_runs` are called by
+`route_board` as post-route global passes — every path has been
+halo-blocked by then, so the forbidden_check accurately reflects the
+final occupancy and the simplification for any one path can't carve
+into a corridor reserved for a later net.
+
+Pipeline order matters: simplify-then-collapse. Simplification turns
+multi-bend wiggles (often non-monotonic, around dense pin rows) into
+clean 1- or 2-bend L-shapes. Collapse then folds monotonic L-shapes
+into 45° diagonals where safe.
 """
 
 from __future__ import annotations
@@ -25,6 +30,177 @@ from vitamins.substrate import Point2D as SubstratePoint2D
 # (the ESP32 GND fanout in particular), preventing collapse of an
 # otherwise-clean NW staircase.
 _PIN_APPROACH_RESIDUAL_MM = 0.5
+
+# Wiggle eliminator knobs. A "wiggle" is a sub-path with multiple
+# direction changes inside a small bounding box — typically the
+# zigzag the router does to escape a dense pin row. The eliminator
+# replaces each with a clean L-bend along the perimeter of the box.
+_WIGGLE_MAX_BOX_MM = 6.0   # cap on bounding-box dimensions; larger
+                           # regions are intentional routing, not a
+                           # tight detour around an obstacle.
+_WIGGLE_MIN_BENDS = 3      # a clean L is 1 bend; 2 means L-with-jog;
+                           # 3+ is a real wiggle worth straightening.
+
+
+def _simplify_wiggles(
+    cells: list[tuple[int, int, int]],
+    g: Grid,
+    *,
+    forbidden_check,  # noqa: ANN001 — matches _collapse_quadrant_runs API
+    max_box_mm: float = _WIGGLE_MAX_BOX_MM,
+    min_bends: int = _WIGGLE_MIN_BENDS,
+) -> list[tuple[int, int, int]]:
+    """Replace tortuous sub-paths with clean L-bends along the wiggle box.
+
+    A wiggle is a contiguous same-layer sub-path with ≥`min_bends`
+    direction changes whose bounding box fits within `max_box_mm` on
+    both axes. For each, tries the candidate L-bends from A to B —
+    direct (2 segments) first, then perimeter pushes (3 segments,
+    through the box's far corners) — and accepts the safest by cell
+    count. "Safe" means every cell on the candidate path passes
+    `forbidden_check` (other paths' halos, foreign pin holes, etc.).
+
+    Wire length grows when a perimeter push wins over the original
+    wiggle, but visual cleanliness wins — the user can read a single
+    L-bend, not so much a 7-segment staircase.
+
+    Runs before `_collapse_quadrant_runs` in the pipeline: simplify
+    turns wiggles into L-shapes, then collapse folds the L-shapes
+    into 45° diagonals where the geometry permits.
+    """
+    if len(cells) < 3:
+        return list(cells)
+
+    max_box_cells = round(max_box_mm / g.res)
+
+    def cell_safe(layer: int, gy: int, gx: int) -> bool:
+        return g.in_bounds(gx, gy) and not forbidden_check(layer, gy, gx)
+
+    def line_cells(
+        layer: int, p0: tuple[int, int], p1: tuple[int, int],
+    ) -> list[tuple[int, int, int]] | None:
+        """Cardinal walk from p0 to p1 (exclusive of p0) as cells.
+
+        Returns None if any cell fails `cell_safe` or if p0/p1 aren't
+        axis-aligned. p0 and p1 are (gx, gy).
+        """
+        gx0, gy0 = p0
+        gx1, gy1 = p1
+        out: list[tuple[int, int, int]] = []
+        if gx0 == gx1:
+            sy = 1 if gy1 > gy0 else -1
+            cy = gy0
+            while cy != gy1:
+                cy += sy
+                if not cell_safe(layer, cy, gx0):
+                    return None
+                out.append((layer, cy, gx0))
+            return out
+        if gy0 == gy1:
+            sx = 1 if gx1 > gx0 else -1
+            cx = gx0
+            while cx != gx1:
+                cx += sx
+                if not cell_safe(layer, gy0, cx):
+                    return None
+                out.append((layer, gy0, cx))
+            return out
+        return None
+
+    def try_polyline(
+        layer: int, points: list[tuple[int, int]],
+    ) -> list[tuple[int, int, int]] | None:
+        """Stitch a sequence of (gx, gy) points into a cell list.
+
+        Each consecutive pair must be cardinal. Returns None if any
+        segment is non-cardinal or unsafe.
+        """
+        out: list[tuple[int, int, int]] = []
+        for k in range(len(points) - 1):
+            seg = line_cells(layer, points[k], points[k + 1])
+            if seg is None:
+                return None
+            out.extend(seg)
+        return out
+
+    result: list[tuple[int, int, int]] = [cells[0]]
+    i = 0
+    n = len(cells)
+    while i < n - 1:
+        layer = cells[i][0]
+        if cells[i + 1][0] != layer:
+            result.append(cells[i + 1])
+            i += 1
+            continue
+
+        x_min = x_max = cells[i][2]
+        y_min = y_max = cells[i][1]
+        bends = 0
+        prev_dir: tuple[int, int] | None = None
+        last_j = i
+        j = i + 1
+        while j < n:
+            cell = cells[j]
+            if cell[0] != layer:
+                break
+            nx_min = min(x_min, cell[2])
+            nx_max = max(x_max, cell[2])
+            ny_min = min(y_min, cell[1])
+            ny_max = max(y_max, cell[1])
+            if (nx_max - nx_min) > max_box_cells or (ny_max - ny_min) > max_box_cells:
+                break
+            x_min, x_max, y_min, y_max = nx_min, nx_max, ny_min, ny_max
+            prev = cells[j - 1]
+            cur_dir = (cell[1] - prev[1], cell[2] - prev[2])
+            if prev_dir is not None and prev_dir != cur_dir:
+                bends += 1
+            prev_dir = cur_dir
+            last_j = j
+            j += 1
+
+        wiggle_len = last_j - i
+        if wiggle_len >= 2 and bends >= min_bends:
+            ax, ay = cells[i][2], cells[i][1]
+            bx, by = cells[last_j][2], cells[last_j][1]
+
+            # Candidate corner sequences (excluding A and B endpoints).
+            # Direct L-bends first (2 segments); then perimeter pushes
+            # via each of the 4 box corners (3 segments) so we can route
+            # around an obstacle the direct L would clip.
+            candidates: list[list[tuple[int, int]]] = []
+            if ax != bx and ay != by:
+                candidates.append([(bx, ay)])
+                candidates.append([(ax, by)])
+            for cx in (x_min, x_max):
+                for cy in (y_min, y_max):
+                    if (cx, cy) in {(ax, ay), (bx, by)}:
+                        continue
+                    if cx != ax and cy != by:
+                        candidates.append([(cx, ay), (cx, by)])
+                    if cy != ay and cx != bx:
+                        candidates.append([(ax, cy), (bx, cy)])
+
+            best: list[tuple[int, int, int]] | None = None
+            for corners in candidates:
+                points = [(ax, ay), *corners, (bx, by)]
+                walk = try_polyline(layer, points)
+                if walk is None:
+                    continue
+                # Compare cell counts: prefer fewer cells. Always at
+                # least one walk shorter than the original wiggle's
+                # cell count (otherwise leave the wiggle alone).
+                if best is None or len(walk) < len(best):
+                    best = walk
+
+            if best is not None and len(best) < wiggle_len:
+                result.extend(best)
+                i = last_j
+                continue
+
+        result.append(cells[i + 1])
+        i += 1
+
+    return result
 
 
 def _collapse_quadrant_runs(

@@ -42,7 +42,11 @@ from board.board import Board
 from board.buses import Net, PinEndpoint, resolve_bus
 from router.astar import _astar
 from router.blocking import _block_path
-from router.collapse import _collapse_quadrant_runs, _path_to_waypoints
+from router.collapse import (
+    _collapse_quadrant_runs,
+    _path_to_waypoints,
+    _simplify_wiggles,
+)
 from router.grid import Grid, _build_grid
 from router.paths import waypoints_to_path
 from router.schedule import _net_priority, _ordered_bus_actions
@@ -296,8 +300,14 @@ def _collapse_one_raw(
             return True
         return cell in raw.other_pin_blockers
 
+    # Simplify wiggles first (turn tortuous zigzags into clean L-bends
+    # along the wiggle's bounding-box perimeter), then collapse
+    # monotonic L-bends into 45° diagonals.
+    simplified = _simplify_wiggles(
+        raw.raw_cells, g, forbidden_check=_forbidden,
+    )
     return _collapse_quadrant_runs(
-        raw.raw_cells, g,
+        simplified, g,
         own_pin_xys=raw.own_pin_xys,
         forbidden_check=_forbidden,
     )
