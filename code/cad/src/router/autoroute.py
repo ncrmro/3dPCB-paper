@@ -43,6 +43,7 @@ from board.buses import Net, PinEndpoint, resolve_bus
 from router.astar import _astar
 from router.blocking import _block_path
 from router.collapse import (
+    _chamfer_pin_corners,
     _collapse_quadrant_runs,
     _path_to_waypoints,
     _simplify_wiggles,
@@ -71,8 +72,16 @@ class _RawPath:
     own_pin_cells: set[tuple[int, int, int]]
     own_pin_xys: set[tuple[float, float]]
     own_via_xys: set[tuple[float, float]]
+    priority_pin_xys: set[tuple[float, float]]
     other_pin_blockers: set[tuple[int, int, int]]
     halo_cells: set[tuple[int, int, int]] = field(default_factory=set)
+
+
+# Signals whose pin corners get an aggressive 45° chamfer on the first
+# / second bend off the pin (when surrounding space permits). Bare
+# copper snags on 90° bends; power/ground wires are routed against
+# tight pin clusters and benefit most from the smoother corner.
+_PRIORITY_CHAMFER_SIGNALS: frozenset[str] = frozenset({"VCC", "3V3", "5V", "GND"})
 
 # ---------------------------------------------------------------------------
 # Failure type
@@ -262,12 +271,23 @@ def _route_one_net(
             if full_cells[k][0] != full_cells[k - 1][0]:
                 vwx, vwy = g.to_world(full_cells[k][2], full_cells[k][1])
                 own_via_xys.add((round(vwx, 3), round(vwy, 3)))
+        # Snap pin xys to the grid so the chamfer pass can match them
+        # against cell-to-world coordinates (cells live on grid
+        # intersections, but pins on 2.54 mm pitch don't align to the
+        # 0.5 mm grid).
+        priority_pin_xys: set[tuple[float, float]] = set()
+        if net.signal in _PRIORITY_CHAMFER_SIGNALS:
+            for ep in net.endpoints:
+                pgx, pgy = g.to_grid(ep.position.x, ep.position.y)
+                pwx, pwy = g.to_world(pgx, pgy)
+                priority_pin_xys.add((round(pwx, 3), round(pwy, 3)))
         raw = _RawPath(
             name=name,
             raw_cells=full_cells,
             own_pin_cells=set(own_pin_cells),
             own_pin_xys=set(own_pin_xys),
             own_via_xys=own_via_xys,
+            priority_pin_xys=priority_pin_xys,
             other_pin_blockers=set(other_pin_blockers),
         )
         out.append((path, raw))
@@ -319,13 +339,20 @@ def _collapse_one_raw(
         return cell in raw.other_pin_blockers
 
     # Simplify wiggles first (turn tortuous zigzags into clean L-bends
-    # along the wiggle's bounding-box perimeter), then collapse
-    # monotonic L-bends into 45° diagonals.
+    # along the wiggle's bounding-box perimeter), then chamfer the
+    # first/second L-corner off any priority-bus pin into a 45°
+    # diagonal, then collapse remaining monotonic staircases into
+    # diagonals.
     simplified = _simplify_wiggles(
         raw.raw_cells, g, forbidden_check=_forbidden,
     )
-    return _collapse_quadrant_runs(
+    chamfered = _chamfer_pin_corners(
         simplified, g,
+        priority_pin_xys=raw.priority_pin_xys,
+        forbidden_check=_forbidden,
+    )
+    return _collapse_quadrant_runs(
+        chamfered, g,
         own_pin_xys=raw.own_pin_xys,
         own_via_xys=raw.own_via_xys,
         forbidden_check=_forbidden,

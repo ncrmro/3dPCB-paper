@@ -8,7 +8,7 @@ collapse honours pin- and via-approach residuals.
 
 from __future__ import annotations
 
-from router.collapse import _collapse_quadrant_runs
+from router.collapse import _chamfer_pin_corners, _collapse_quadrant_runs
 from router.grid import GRID_RES_MM, Grid
 
 
@@ -69,6 +69,61 @@ def test_collapse_keeps_via_residual_at_diagonal_start():
     assert (dgx == 0 and dgy == 1) or (dgx == 1 and dgy == 0), (
         f"first move after via must be cardinal, got d=({dgy},{dgx})"
     )
+
+
+def test_chamfer_replaces_clean_l_with_diagonal_at_priority_pin():
+    """A clean cardinal L-shape rooted at a priority pin gets its
+    90° corner replaced with a 45° diagonal chamfer.
+    """
+    g = _grid()
+    # 5-cell horizontal leg then 5-cell vertical leg = clean L at (5, 9)
+    cells = [
+        (0, 5, 5),  # pin
+        (0, 5, 6),
+        (0, 5, 7),
+        (0, 5, 8),
+        (0, 5, 9),  # corner
+        (0, 6, 9),
+        (0, 7, 9),
+        (0, 8, 9),
+        (0, 9, 9),
+    ]
+    pin_xy = g.to_world(5, 5)
+    priority_pin_xys = {(round(pin_xy[0], 3), round(pin_xy[1], 3))}
+
+    chamfered = _chamfer_pin_corners(
+        cells, g,
+        priority_pin_xys=priority_pin_xys,
+        forbidden_check=_allow_all,
+        max_per_pin=1,
+    )
+
+    # The result must be shorter than the input (chamfer removes cells).
+    assert len(chamfered) < len(cells), (
+        f"chamfer should shrink the cell list, got {len(chamfered)} cells"
+    )
+    # At least one diagonal step (both gy and gx change by 1).
+    has_diag = any(
+        abs(chamfered[i][1] - chamfered[i - 1][1]) == 1
+        and abs(chamfered[i][2] - chamfered[i - 1][2]) == 1
+        for i in range(1, len(chamfered))
+    )
+    assert has_diag, f"expected a diagonal step in chamfered path: {chamfered}"
+
+
+def test_chamfer_noop_when_no_priority_pins():
+    """With no priority pins, the chamfer pass returns the input unchanged."""
+    g = _grid()
+    cells = [
+        (0, 5, 5), (0, 5, 6), (0, 5, 7), (0, 5, 8), (0, 5, 9),
+        (0, 6, 9), (0, 7, 9), (0, 8, 9), (0, 9, 9),
+    ]
+    chamfered = _chamfer_pin_corners(
+        cells, g,
+        priority_pin_xys=set(),
+        forbidden_check=_allow_all,
+    )
+    assert chamfered == cells
 
 
 def test_collapse_diagonalizes_when_no_via_or_pin_endpoint():

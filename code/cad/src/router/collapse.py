@@ -38,6 +38,12 @@ _PIN_APPROACH_RESIDUAL_MM = 0.5
 # the 1.5 mm via barrel.
 _VIA_APPROACH_RESIDUAL_MM = 0.5
 
+# Maximum diagonal length (in grid cells) of the chamfer that replaces a
+# clean cardinal L-bend on the first / second corner off a priority-bus
+# pin. 4 cells = 2 mm at 0.5 mm grid res — enough to noticeably soften
+# the corner without spending more material than the L it replaces.
+_FIRST_BEND_CHAMFER_CELLS = 4
+
 # Wiggle eliminator knobs. A "wiggle" is a sub-path with multiple
 # direction changes inside a small bounding box — typically the
 # zigzag the router does to escape a dense pin row. The eliminator
@@ -217,6 +223,163 @@ def _simplify_wiggles(
         i += 1
 
     return result
+
+
+def _find_l_corner_after(
+    cells: list[tuple[int, int, int]], start_idx: int,
+) -> tuple[int, int, int, int, int, int, int] | None:
+    """First 90° cardinal L-corner at or after `start_idx` on the same
+    layer.
+
+    Walks the same-layer path forward, partitioning it into
+    direction-constant segments (cardinal or diagonal), and returns the
+    first pair of consecutive segments that are both cardinal and
+    perpendicular. Diagonal segments in the path (left by an earlier
+    chamfer or `_collapse_quadrant_runs`) are skipped — the search
+    continues into the next cardinal segment.
+
+    Returns (corner_idx, dy_b, dx_b, dy_a, dx_a, leg_b_len, leg_a_len)
+    or None.
+    """
+    n = len(cells)
+    if start_idx >= n - 2:
+        return None
+    layer = cells[start_idx][0]
+
+    # Partition the same-layer path into direction-constant segments.
+    segments: list[tuple[int, int, int, int]] = []
+    i = start_idx
+    while i < n - 1 and cells[i][0] == layer and cells[i + 1][0] == layer:
+        dy = cells[i + 1][1] - cells[i][1]
+        dx = cells[i + 1][2] - cells[i][2]
+        if (dy, dx) == (0, 0):
+            i += 1
+            continue
+        j = i + 1
+        while j < n - 1 and cells[j + 1][0] == layer:
+            ndy = cells[j + 1][1] - cells[j][1]
+            ndx = cells[j + 1][2] - cells[j][2]
+            if (ndy, ndx) != (dy, dx):
+                break
+            j += 1
+        segments.append((i, j, dy, dx))
+        i = j
+
+    for s in range(len(segments) - 1):
+        sa_start, sa_end, dy_b, dx_b = segments[s]
+        sb_start, sb_end, dy_a, dx_a = segments[s + 1]
+        a_card = (dy_b == 0) != (dx_b == 0)
+        b_card = (dy_a == 0) != (dx_a == 0)
+        if not (a_card and b_card):
+            continue
+        # Perpendicular: one segment is horizontal, the other vertical.
+        if (dy_b == 0) == (dy_a == 0):
+            continue
+        # The corner cell is segA's end == segB's start (same index in
+        # `cells`, since segments are contiguous).
+        return (sa_end, dy_b, dx_b, dy_a, dx_a,
+                sa_end - sa_start, sb_end - sb_start)
+    return None
+
+
+def _chamfer_pin_corners(
+    cells: list[tuple[int, int, int]],
+    g: Grid,
+    *,
+    priority_pin_xys: set[tuple[float, float]],
+    forbidden_check,  # noqa: ANN001 — same shape as the others
+    max_per_pin: int = 2,
+) -> list[tuple[int, int, int]]:
+    """Replace cardinal L-corners on the first / second bend off each
+    priority-bus pin with a 45° diagonal chamfer.
+
+    Solid copper wire snags on 90° corners — power/ground wires routed
+    against tight pin clusters benefit from a smoother first bend even
+    when the L-shape isn't a monotonic staircase (which
+    `_collapse_quadrant_runs` could fold). Runs before
+    `_collapse_quadrant_runs` in the pipeline so the staircase collapse
+    sees the chamfered shape and stays consistent.
+
+    Skips silently if `priority_pin_xys` is empty.
+    """
+    if len(cells) < 3 or not priority_pin_xys:
+        return list(cells)
+
+    def cell_safe(layer: int, gy: int, gx: int) -> bool:
+        return g.in_bounds(gx, gy) and not forbidden_check(layer, gy, gx)
+
+    def is_priority(idx: int) -> tuple[float, float] | None:
+        c = result[idx]
+        wx, wy = g.to_world(c[2], c[1])
+        xy = (round(wx, 3), round(wy, 3))
+        return xy if xy in priority_pin_xys else None
+
+    result = list(cells)
+    chamfered: dict[tuple[float, float], int] = {}
+
+    # Repeatedly find the next eligible (pin, corner) pair and chamfer it.
+    # Re-scan from scratch each iteration because chamfering shifts later
+    # indices; `max_per_pin` per pin xy bounds the loop.
+    while True:
+        target = None
+        for idx in range(len(result)):
+            xy = is_priority(idx)
+            if xy is None:
+                continue
+            if chamfered.get(xy, 0) >= max_per_pin:
+                continue
+            corner = _find_l_corner_after(result, idx)
+            if corner is None:
+                continue
+            target = (idx, xy, corner)
+            break
+        if target is None:
+            return result
+
+        pin_idx, xy, (corner_idx, dy_b, dx_b, dy_a, dx_a,
+                      leg_b_len, leg_a_len) = target
+        # Reserve a one-cell cardinal residual at the pin endpoint of
+        # the leg-before so the diagonal can't land flush against the
+        # pin barrel. Only needed when this is the first L off the pin
+        # (leg_b_len cells separate the pin from the corner).
+        pin_residual = 1 if corner_idx - leg_b_len == pin_idx else 0
+        k_max = min(_FIRST_BEND_CHAMFER_CELLS, leg_b_len - pin_residual, leg_a_len)
+
+        applied = 0
+        for k in range(k_max, 0, -1):
+            sy_diag = dy_b + dy_a  # exactly one of each pair is 0
+            sx_diag = dx_b + dx_a
+            anchor = result[corner_idx - k]
+            new_diag: list[tuple[int, int, int]] = []
+            safe = True
+            for step in range(1, k):
+                ngy = anchor[1] + step * sy_diag
+                ngx = anchor[2] + step * sx_diag
+                for c in ((anchor[0], ngy, ngx),
+                          (anchor[0], ngy - sy_diag, ngx),
+                          (anchor[0], ngy, ngx - sx_diag)):
+                    if not cell_safe(*c):
+                        safe = False
+                        break
+                if not safe:
+                    break
+                new_diag.append((anchor[0], ngy, ngx))
+            if safe:
+                # Replace cells (corner-k+1 .. corner+k-1) with new_diag.
+                # That's 2k-1 cells replaced by k-1 cells (list shrinks
+                # by k); the surviving cells (corner-k) and (corner+k)
+                # become the diagonal's anchor and destination.
+                result[corner_idx - k + 1 : corner_idx + k] = new_diag
+                applied = k
+                break
+
+        # Count the attempt against the pin's budget regardless of
+        # outcome — if no safe k worked, the same L would be re-tried
+        # forever otherwise.
+        chamfered[xy] = chamfered.get(xy, 0) + 1
+        if applied == 0:
+            # Bump to max so we never retry this pin's stuck L.
+            chamfered[xy] = max_per_pin
 
 
 def _collapse_quadrant_runs(
