@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_sensors_flipped",
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
-    "total_length_mm": 332.941,
-    "l1_length_mm": 305.906,
+    "total_length_mm": 333.234,
+    "l1_length_mm": 306.198,
     "l2_length_mm": 27.036,
     "via_count": 5,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 218.506
+    "aggregate": 218.653
   },
   "invariants": [
     {

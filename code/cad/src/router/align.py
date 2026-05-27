@@ -403,30 +403,39 @@ def align_pair_pitch(
         if rp1 is None:
             continue
         forbidden_check = forbidden_check_factory(rp2)
-        runs2 = _find_runs(rp2.raw_cells, _ALIGN_MIN_RUN_CELLS)
-        # Apply shifts longest-first so the most-impactful run wins.
-        runs2.sort(key=lambda r: r.length, reverse=True)
-        applied = False
-        for run in runs2:
-            if applied:
-                # Re-find after first shift since indices changed.
+        # Iterate: each successful shift may unmask a new candidate run
+        # (indices change after a shift, and a midline trunk that
+        # previously sat behind a longer south run becomes reachable
+        # once the south run is aligned). Bounded by the number of
+        # _find_runs results; in practice converges after ≤ 3 passes.
+        max_iters = 8
+        while max_iters > 0:
+            max_iters -= 1
+            runs2 = _find_runs(rp2.raw_cells, _ALIGN_MIN_RUN_CELLS)
+            runs2.sort(key=lambda r: r.length, reverse=True)
+            progress = False
+            for run in runs2:
+                partner_run = _find_partner_run(rp1.raw_cells, run, rp2.pair_pitch_cells)
+                if partner_run is None:
+                    continue
+                current_offset = run.constant - partner_run.constant
+                if current_offset == 0:
+                    continue
+                sign = 1 if current_offset > 0 else -1
+                desired_offset = sign * rp2.pair_pitch_cells
+                if abs(abs(current_offset) - rp2.pair_pitch_cells) == 0:
+                    continue
+                target_constant = partner_run.constant + desired_offset
+                new_cells = _shift_run(rp2.raw_cells, run, target_constant)
+                if new_cells == rp2.raw_cells:
+                    continue
+                if not _cells_safe(new_cells, forbidden_check):
+                    continue
+                rp2.raw_cells = new_cells
+                progress = True
                 break
-            partner_run = _find_partner_run(rp1.raw_cells, run, rp2.pair_pitch_cells)
-            if partner_run is None:
-                continue
-            current_offset = run.constant - partner_run.constant
-            sign = 1 if current_offset > 0 else -1
-            desired_offset = sign * rp2.pair_pitch_cells
-            if abs(abs(current_offset) - rp2.pair_pitch_cells) == 0:
-                continue
-            target_constant = partner_run.constant + desired_offset
-            new_cells = _shift_run(rp2.raw_cells, run, target_constant)
-            if new_cells == rp2.raw_cells:
-                continue
-            if not _cells_safe(new_cells, forbidden_check):
-                continue
-            rp2.raw_cells = new_cells
-            applied = True
+            if not progress:
+                break
 
 
 def _seg_length_mm(seg) -> float:
