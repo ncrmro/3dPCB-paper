@@ -31,6 +31,16 @@ GRID_RES_MM = 0.5
 # at the pin row.
 APPROACH_DEPTH = 3
 
+# Parallel-axis reserve at a dense-cluster pin: how many cells along the
+# row direction get added to the owning net's approach (so cross-nets
+# can't sit that close). ±1 keeps cross-net wires at 1.0 mm — below the
+# 1.4 mm wall_floor. ±2 keeps them at ≥ 1.5 mm, satisfying wall_floor
+# while still permitting routability at the 5-cell pin pitch (own
+# parallel reserves of adjacent pins fill the gap exactly with no
+# overlap; cross-net wires must leave the row before crossing the pin
+# pitch midpoint).
+DENSE_PIN_PARALLEL_RESERVE = 2
+
 
 @dataclass
 class Grid:
@@ -292,19 +302,21 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
                                     and own_pocket.y_min <= wy <= own_pocket.y_max):
                                 continue
                         approach.add((ly, ny, nx))
-            # For dense pins also reserve the immediate parallel-axis
-            # neighbours as part of the owning net's approach — own
-            # net can traverse them, but other nets' `extra_blocked`
-            # includes them so a cross-net wire can't sit one cell
-            # off the dense pin (where halo doesn't reach because of
-            # the own_pin_cells exemption).
+            # For dense pins also reserve parallel-axis neighbours as
+            # part of the owning net's approach — own net can traverse
+            # them, but other nets' `extra_blocked` includes them so a
+            # cross-net wire can't sit close along the row (where halo
+            # doesn't reach because of the own_pin_cells exemption).
+            # Depth `DENSE_PIN_PARALLEL_RESERVE` controls the
+            # wall-floor distance along the row.
             if dense_axis is not None:
                 par_dx, par_dy = perp_dy, perp_dx
                 for ly in (0, 1):
                     for s in (-1, 1):
-                        nx, ny = gx + s * par_dx, gy + s * par_dy
-                        if g.in_bounds(nx, ny):
-                            approach.add((ly, ny, nx))
+                        for k in range(1, DENSE_PIN_PARALLEL_RESERVE + 1):
+                            nx, ny = gx + s * k * par_dx, gy + s * k * par_dy
+                            if g.in_bounds(nx, ny):
+                                approach.add((ly, ny, nx))
                 # Diagonal "buffer" cells around the dense pin go into
                 # `other_net_buffer_by_pin` (consumed via
                 # `extra_blocked` in `_route_one_net`). Own net is not

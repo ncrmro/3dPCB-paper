@@ -28,7 +28,7 @@
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
       "passed": false,
-      "message": "min cross-net centreline: 1.12 mm (floor 1.40; worst pair primary_SCL \u2194 primary_GND; 7 sample pairs below the floor)"
+      "message": "min cross-net centreline: 1.00 mm (floor 1.40; worst pair primary_SCL \u2194 primary_GND; 26 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",

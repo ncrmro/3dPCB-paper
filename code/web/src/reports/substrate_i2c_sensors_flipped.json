@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_sensors_flipped",
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
-    "total_length_mm": 333.234,
+    "total_length_mm": 332.941,
     "l1_length_mm": 305.906,
-    "l2_length_mm": 27.328,
+    "l2_length_mm": 27.036,
     "via_count": 5,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 218.945
+    "aggregate": 218.506
   },
   "invariants": [
     {
@@ -27,8 +27,8 @@
     {
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
-      "passed": false,
-      "message": "min cross-net centreline: 1.00 mm (floor 1.40; worst pair primary_SCL \u2194 primary_SDA; 23 sample pairs below the floor)"
+      "passed": true,
+      "message": "min cross-net centreline: 1.50 mm (floor 1.40; worst pair primary_SCL \u2194 primary_SDA; 0 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
