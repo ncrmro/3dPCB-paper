@@ -342,17 +342,30 @@ class BoardSubstrate(ad.CompositeShape):
         # vias drilled through the full plate. Wired up in Phase 2.
         signal_paths = _route_or_empty(board, dims)
         for path in signal_paths:
+            # Local import keeps the module load order tolerant of
+            # the autorouter being filled in mid-phase.
+            from vitamins.substrate import Via, WireSegment, _cut_joint
+            prev_seg = None
             for i, elt in enumerate(path.elements):
-                # Local import keeps the module load order tolerant of
-                # the autorouter being filled in mid-phase.
-                from vitamins.substrate import Via, WireSegment
                 if isinstance(elt, WireSegment):
                     _cut_segment(
                         maker, elt, dims, l1_z, l2_z,
                         name=f"{path.name}_seg{i}",
                     )
+                    if (
+                        prev_seg is not None
+                        and prev_seg.layer == elt.layer
+                        and prev_seg.end.x == elt.start.x
+                        and prev_seg.end.y == elt.start.y
+                    ):
+                        _cut_joint(
+                            maker, elt.start, elt.layer, dims, l1_z, l2_z,
+                            name=f"{path.name}_joint{i}",
+                        )
+                    prev_seg = elt
                 elif isinstance(elt, Via):
                     _cut_via(maker, elt, dims, name=f"{path.name}_via{i}")
+                    prev_seg = None
 
         return maker
 

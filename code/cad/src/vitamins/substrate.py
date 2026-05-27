@@ -95,3 +95,32 @@ def _cut_via(
         cyl.hole(name).at("centre"),
         post=ad.translate([via.position.x, via.position.y, 0]),
     )
+
+
+def _cut_joint(
+    shape,
+    point: "Point2D",
+    layer: int,
+    dim,
+    l1_z: float,
+    l2_z: float,
+    name: str,
+) -> None:
+    """Carve a corner-fill cylinder at the meeting point of two adjacent
+    same-layer segments.
+
+    Each `_cut_segment` emits an independently-rotated rectangular box.
+    At a bend, the two boxes' end-caps overlap with misaligned edges and
+    the CSG subtract leaves staircase artifacts. A cylinder inscribed
+    in the channel cross-section bridges both boxes cleanly regardless
+    of bend angle (45° or 90°).
+    """
+    cw = dim.channel_width
+    cd = dim.channel_depth
+    cm = dim.overcut
+    z = l1_z if layer == 1 else l2_z
+    cyl = ad.Cylinder(r=cw / 2, h=cd + cm)
+    shape.add_at(
+        cyl.hole(name).at("centre"),
+        post=ad.translate([point.x, point.y, z]),
+    )
