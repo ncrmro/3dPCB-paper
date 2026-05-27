@@ -528,6 +528,10 @@ const placements: Placement[] = Object.values(placementYamls).map(
             mv.setAttribute("src", `${base}?t=${t}`);
           });
         });
+        // A manifest rewrite means new/removed cards — the index
+        // page module has already been invalidated server-side, so
+        // a reload pulls fresh HTML.
+        import.meta.hot.on("manifest-changed", () => location.reload());
       }
     </script>
   </body>

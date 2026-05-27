@@ -273,6 +273,11 @@ class BoardSubstrate(ad.CompositeShape):
             )
 
         # ---- device pockets + pin holes ------------------------------
+        # Only drill holes for pins that a bus actually wires up.
+        # Skipping the ~18 unused GPIO pins on the ESP32-C3 SuperMini
+        # (and ADDR on the BH1750) cuts FDM print time meaningfully
+        # and leaves more substrate for the channels to live in.
+        endpoint_xys = board.bus_endpoint_xys()
         for inst in board.devices:
             footprint = _rotated_footprint(inst)
             # Pocket only for flat-mounted devices (header-mounted devices
@@ -300,6 +305,8 @@ class BoardSubstrate(ad.CompositeShape):
             for i, (pin, abs_pos) in enumerate(_device_pin_positions(inst)):
                 # i is unique across the device's full pin tuple — pin.index
                 # repeats across columns (J1A.1 / J1B.1 both have index 1).
+                if (round(abs_pos.x, 3), round(abs_pos.y, 3)) not in endpoint_xys:
+                    continue
                 _drill_pin_hole(
                     maker, abs_pos.x, abs_pos.y, dims,
                     name=f"pin_{inst.name}_{i}",

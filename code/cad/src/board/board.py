@@ -184,3 +184,15 @@ class Board(BaseModel):
         for bus in self.buses:
             all_nets.extend(resolve_bus(bus, bound))
         return tuple(all_nets)
+
+    def bus_endpoint_xys(self) -> set[tuple[float, float]]:
+        """Set of `(round(x, 3), round(y, 3))` keys for every pin that
+        any bus actually wires up. Used by the builder + reports to
+        skip drilling holes for unconnected device pins (e.g. the
+        20+ unused ESP32-C3 SuperMini GPIO pins) — drilling them adds
+        print time and weakens the substrate for no functional gain."""
+        return {
+            (round(ep.position.x, 3), round(ep.position.y, 3))
+            for net in self.nets()
+            for ep in net.endpoints
+        }

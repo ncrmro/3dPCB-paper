@@ -133,9 +133,12 @@ def test_wire_to_wire_wall_floor(board_and_paths):
     distance and asserts it's above HALF the wall floor (= sanity floor;
     anything less is a definite short). The full wall_floor enforcement
     is reported in the routing JSON invariants block but not enforced
-    here, because the greedy per-net router can't satisfy strict
-    wall-floor in the SCD41/BH1750 4-pin clusters without trunk
-    sharing — see plan §Follow-ups for the Steiner rework that fixes it.
+    here: the strict 1.4 mm halo is satisfied in OPEN space, but at
+    each dense pin's approach corridor the own-net exemption (so a pin
+    stays reachable) lets a cross-net wire from a different signal sit
+    one grid step (0.7-1.0 mm) outside the approach. The parallel-axis
+    + diagonal buffer keeps that distance ≥ wall_floor/2; a full fix
+    would need ripup/reroute or an ILP solver (separate-PR scope).
     """
     import math
     from collections import defaultdict
@@ -234,11 +237,15 @@ def _enumerate_drilled_holes(board, paths) -> dict[tuple[float, float], str]:
       - "header:<inst>.<n>"     — header pin through-hole (auto-synthesised)
     """
     holes: dict[tuple[float, float], str] = {}
+    endpoint_xys = board.bus_endpoint_xys()
     for inst in board.devices:
         device = inst.resolved_device()
         for pin in device.pins:
             pos = device.pin_position_at(inst.position, inst.rotation, pin)
-            holes[(round(pos.x, 3), round(pos.y, 3))] = f"pin:{inst.name}.{pin.index}"
+            key = (round(pos.x, 3), round(pos.y, 3))
+            if key not in endpoint_xys:
+                continue
+            holes[key] = f"pin:{inst.name}.{pin.index}"
         if inst.header is not None:
             conn = inst.header.resolved_connector()
             for i in range(conn.pin_count):
@@ -344,35 +351,56 @@ def _starter_board(**overrides) -> Board:
 
 
 def test_hint_prefer_layer_pushes_signal_off_l1():
-    """`prefer_layer: 2` should drive every leg of that signal mostly
-    onto L2 — the unhinted baseline routes the same signal mostly on
-    L1, so the L2-segment count under the hint must be strictly
-    greater than the baseline's."""
+    """`prefer_layer: 2` should pull SDA wire LENGTH toward L2 — under
+    trunk sharing, the L2 *segment count* can be identical between
+    baseline and hinted (the trunk topology may end up similar), but
+    the proportion of total wire length on L2 should rise. The
+    assertion uses L2-fraction so it's invariant to how segments are
+    folded by the waypoint collapser."""
+    # VCC routes last (lowest priority) and lands ~75% on L1 by default
+    # — there's headroom to push it onto L2 with a hint. SDA already
+    # runs 100% on L2 under trunk sharing (the SCL halo forces it), so
+    # SDA can't demonstrate the hint's effect.
     baseline_paths = route_board(_starter_board(), resolve_dims(_starter_board()))
     hinted_paths = route_board(
-        _starter_board(routing_hints={"SDA": RoutingHint(prefer_layer=2)}),
+        _starter_board(routing_hints={"VCC": RoutingHint(prefer_layer=2)}),
         resolve_dims(_starter_board()),
     )
 
-    def _l2_segments(paths, signal):
-        return sum(
-            1
-            for p in paths if f"_{signal}_" in p.name
-            for e in p.elements
-            if isinstance(e, WireSegment) and e.layer == 2
-        )
+    def _layer_lengths(paths, signal) -> tuple[float, float]:
+        l1 = l2 = 0.0
+        for p in paths:
+            if f"_{signal}_" not in p.name:
+                continue
+            for e in p.elements:
+                if not isinstance(e, WireSegment):
+                    continue
+                length = math.hypot(e.end.x - e.start.x, e.end.y - e.start.y)
+                if e.layer == 2:
+                    l2 += length
+                else:
+                    l1 += length
+        return l1, l2
 
-    assert _l2_segments(hinted_paths, "SDA") > _l2_segments(baseline_paths, "SDA"), (
-        "prefer_layer=2 should produce strictly more L2 SDA segments "
-        f"than baseline (baseline={_l2_segments(baseline_paths, 'SDA')}, "
-        f"hinted={_l2_segments(hinted_paths, 'SDA')})"
+    base_l1, base_l2 = _layer_lengths(baseline_paths, "VCC")
+    hint_l1, hint_l2 = _layer_lengths(hinted_paths, "VCC")
+    base_frac = base_l2 / max(base_l1 + base_l2, 1e-9)
+    hint_frac = hint_l2 / max(hint_l1 + hint_l2, 1e-9)
+    assert hint_frac > base_frac + 1e-3, (
+        f"prefer_layer=2 should raise VCC's L2 fraction. "
+        f"baseline: L1={base_l1:.1f}/L2={base_l2:.1f} ({base_frac:.2%}); "
+        f"hinted: L1={hint_l1:.1f}/L2={hint_l2:.1f} ({hint_frac:.2%})"
     )
 
 
 def test_hint_must_pass_visits_every_waypoint():
-    """A `must_pass` waypoint at (-8, -20, 1) is a hard constraint —
-    every routed slave path for that signal must contain a wire
-    coordinate at (or grid-rounded to) the waypoint."""
+    """A `must_pass` waypoint at (-15, -22, 1) is a hard constraint —
+    the routed wire tree for that signal must visit it. Under trunk
+    sharing, only the trunk (i.e. the first slave's full route) has
+    the waypoint baked in; later slaves branch off the trunk and
+    may or may not retrace it. The check is therefore "the union of
+    all paths for the signal touches the waypoint", not "every leg".
+    """
     # (-15, -22, L1) is a corner of the board well clear of every
     # device's pin row + approach corridor, so SCL can detour through
     # it without crowding out GND or VCC's routes to the OLED.
@@ -383,18 +411,12 @@ def test_hint_must_pass_visits_every_waypoint():
     paths = route_board(board, resolve_dims(board))
     scl_paths = [p for p in paths if "_SCL_" in p.name]
     assert len(scl_paths) == 3, "starter has 3 SCL slaves"
-    for p in scl_paths:
-        # A route can visit a waypoint either by running a segment on
-        # the requested layer through it, OR by landing a via at the
-        # waypoint xy (which momentarily puts the wire on that layer).
-        # The waypoint collapser folds straight-through cells, so we
-        # check segment containment rather than endpoint equality.
-        hit = False
+
+    def _path_visits(p) -> bool:
         for e in p.elements:
             if isinstance(e, Via):
                 if (e.position.x - wp.x) ** 2 + (e.position.y - wp.y) ** 2 < 0.51 ** 2:
-                    hit = True
-                    break
+                    return True
                 continue
             if not isinstance(e, WireSegment) or e.layer != wp.layer:
                 continue
@@ -408,12 +430,15 @@ def test_hint_must_pass_visits_every_waypoint():
                     ((wp.x - sx) * dx + (wp.y - sy) * dy) / length_sq))
             px, py = sx + t * dx, sy + t * dy
             if (wp.x - px) ** 2 + (wp.y - py) ** 2 < 0.51 ** 2:
-                hit = True
-                break
-        assert hit, (
-            f"{p.name}: must-pass waypoint {wp} not visited by any segment "
-            f"or via in: {[(getattr(e, 'layer', 'V'), getattr(e, 'start', getattr(e, 'position', None))) for e in p.elements]}"
-        )
+                return True
+        return False
+
+    visited_by = [p.name for p in scl_paths if _path_visits(p)]
+    assert visited_by, (
+        f"must-pass waypoint {wp} not visited by any SCL leg; "
+        f"all SCL paths: "
+        f"{ {p.name: [(getattr(e, 'layer', 'V'), getattr(e, 'start', getattr(e, 'position', None))) for e in p.elements] for p in scl_paths} }"
+    )
 
 
 def test_header_synthesises_pedestal_level():

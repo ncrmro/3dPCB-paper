@@ -32,6 +32,19 @@ _BUS_SIGNALS: dict[str, tuple[str, ...]] = {
 }
 
 
+# Pair groupings within a bus — `(first, second)` tuples that the
+# router uses to bundle related signals. The router routes the FIRST
+# signal of each pair to claim a trunk corridor, then routes the
+# SECOND signal with a parallel-bias A* cost that rewards staying
+# alongside the first. Result: VCC + GND stay together, SCL + SDA
+# stay together.
+_BUS_PAIRS: dict[str, tuple[tuple[str, str], ...]] = {
+    "i2c":  (("VCC", "GND"), ("SCL", "SDA")),
+    "uart": (("VCC", "GND"), ("TX", "RX")),
+    "spi":  (("VCC", "GND"), ("SCK", "MOSI"), ("MISO", "CS")),
+}
+
+
 def bus_signals(kind: str) -> tuple[str, ...]:
     try:
         return _BUS_SIGNALS[kind]
@@ -40,6 +53,12 @@ def bus_signals(kind: str) -> tuple[str, ...]:
         raise KeyError(
             f"unknown bus kind {kind!r}; known: {known}"
         ) from exc
+
+
+def bus_pairs(kind: str) -> tuple[tuple[str, str], ...]:
+    """Return the (first, second) pair tuples for this bus kind.
+    Signals not listed in any pair fall through to default ordering."""
+    return _BUS_PAIRS.get(kind, ())
 
 
 # ---------------------------------------------------------------------------

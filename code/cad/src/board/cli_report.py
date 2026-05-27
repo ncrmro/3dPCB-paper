@@ -90,11 +90,15 @@ def _inv_edge_clearance(board: Board, paths, dims) -> tuple[bool, str]:
 def _inv_drilled_holes_match_vias(board: Board, paths) -> tuple[bool, str]:
     """The lock against the bug class that motivated the rewrite."""
     holes: dict[tuple[float, float], str] = {}
+    endpoint_xys = board.bus_endpoint_xys()
     for inst in board.devices:
         device = inst.resolved_device()
         for pin in device.pins:
             pos = device.pin_position_at(inst.position, inst.rotation, pin)
-            holes[(round(pos.x, 3), round(pos.y, 3))] = f"pin:{inst.name}.{pin.index}"
+            key = (round(pos.x, 3), round(pos.y, 3))
+            if key not in endpoint_xys:
+                continue
+            holes[key] = f"pin:{inst.name}.{pin.index}"
     orphans = []
     for p in paths:
         for elt in p.elements:
@@ -211,10 +215,13 @@ def _run_invariants(board: Board, paths, dims) -> list[dict]:
 
 def _hole_table(board: Board, paths, dims) -> list[dict]:
     rows: list[dict] = []
+    endpoint_xys = board.bus_endpoint_xys()
     for inst in board.devices:
         device = inst.resolved_device()
         for pin in device.pins:
             pos = device.pin_position_at(inst.position, inst.rotation, pin)
+            if (round(pos.x, 3), round(pos.y, 3)) not in endpoint_xys:
+                continue
             rows.append({
                 "source": "pin",
                 "ref": f"{inst.name}.{pin.index}",

@@ -16,6 +16,14 @@ const HERE = fileURLToPath(new URL('.', import.meta.url));
 const PUBLIC_CAD_DIR = resolve(HERE, 'public/models/cad');
 const REPORTS_DIR = resolve(HERE, 'src/reports');
 const SPECS_DIR = resolve(HERE, '../cad/specs');
+const SRC_DIR = resolve(HERE, 'src');
+const INDEX_PAGE = resolve(HERE, 'src/pages/index.astro');
+const FOCUS_PAGE = resolve(HERE, 'src/pages/model/[project]/[name].astro');
+const MANIFEST_FILES = new Set([
+  resolve(HERE, 'src/manifest.cad.yaml'),
+  resolve(HERE, 'src/manifest.kicad.yaml'),
+  resolve(HERE, 'src/manifest.vitamins.yaml'),
+]);
 
 /**
  * Dev-only Vite plugin that watches the staged GLBs + report JSONs
@@ -76,6 +84,17 @@ function glbHotReloadPlugin() {
         }
       };
 
+      // CRITICAL: pages use `export const prerender = true` + ?raw-imported
+      // JSON/YAML, so Vite's module graph caches the inlined string. A
+      // plain `location.reload()` re-serves the same prerendered HTML
+      // until we explicitly invalidate the page module. This helper
+      // evicts a module by absolute path so the next SSR re-reads the
+      // file from disk.
+      const invalidate = (absPath) => {
+        const mod = server.moduleGraph.getModuleById(absPath);
+        if (mod) server.moduleGraph.invalidateModule(mod);
+      };
+
       startWatch(PUBLIC_CAD_DIR, (full) => {
         if (!full.endsWith('.glb')) return;
         const rel = relative(PUBLIC_CAD_DIR, full);
@@ -90,7 +109,27 @@ function glbHotReloadPlugin() {
 
       startWatch(REPORTS_DIR, (full) => {
         if (!full.endsWith('.json')) return;
+        // The focus page inlines reports via ?raw — invalidate it so
+        // the reload picks up new numbers instead of re-serving stale
+        // prerendered HTML.
+        invalidate(FOCUS_PAGE);
         server.ws.send({ type: 'custom', event: 'report-changed', data: { path: full } });
+        server.config.logger.info(`[glb-hot-reload] pushed report-changed ${relative(REPORTS_DIR, full)}`);
+      });
+
+      // Manifest YAMLs live flat in src/; watching src/ non-recursively
+      // also surfaces events for pages/, reports/, etc. We filter to
+      // the three manifest files so unrelated edits don't trigger a
+      // full-page reload.
+      startWatch(SRC_DIR, (full) => {
+        if (!MANIFEST_FILES.has(full)) return;
+        // Both the index and the focus page (via getStaticPaths) inline
+        // these manifests — invalidate both so a brand-new model entry
+        // produces a reachable focus page on the next request.
+        invalidate(INDEX_PAGE);
+        invalidate(FOCUS_PAGE);
+        server.ws.send({ type: 'custom', event: 'manifest-changed', data: { path: full } });
+        server.config.logger.info(`[glb-hot-reload] pushed manifest-changed ${relative(SRC_DIR, full)}`);
       });
 
       startWatch(SPECS_DIR, (full) => {

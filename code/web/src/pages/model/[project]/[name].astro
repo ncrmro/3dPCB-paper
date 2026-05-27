@@ -389,6 +389,11 @@ if (project === "cad") {
           // Reports are inlined at SSR via ?raw; rebuild → file mtime
           // bumps → ?raw cache miss → we reload to pick up new numbers.
           import.meta.hot.on("report-changed", () => location.reload());
+          // Manifest changes can rename / add / remove substrate entries
+          // that this page depends on via getStaticPaths — the plugin
+          // invalidates the focus page module, so a reload re-resolves
+          // the route against the fresh manifest.
+          import.meta.hot.on("manifest-changed", () => location.reload());
         }
       </script>
 
