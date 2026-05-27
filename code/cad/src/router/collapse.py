@@ -2,10 +2,11 @@
 diagonals, then fold runs of unit cells into Waypoints at corners and
 layer changes.
 
-`_collapse_quadrant_runs` is currently dormant — wiring it into the
-routing pipeline needs a post-route global-halo pass with awareness of
-every other path's footprint. The function is kept here so the future
-post-route step has a ready primitive to call.
+`_collapse_quadrant_runs` is called by `route_board` as a post-route
+global pass — every path has been halo-blocked by then, so the
+forbidden_check accurately reflects the final occupancy and the
+collapse for any one path can't carve into a corridor reserved for a
+later net.
 """
 
 from __future__ import annotations

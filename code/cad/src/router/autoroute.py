@@ -12,17 +12,23 @@ builder can carve. The algorithm:
      The cost function favours short axis-aligned runs on the back
      layer (L1) and penalises layer changes, edge proximity, and
      crossings.
-  5. Convert the grid path back into `Waypoint`s, fold consecutive
-     same-layer same-direction steps into single segments, and emit
-     a `SignalPath` per net.
+  5. Once every net is routed and halo-blocked, a global post-pass
+     collapses monotonic-quadrant cardinal staircases into 45°
+     diagonals using each path's raw cell list with self-exemption.
+     Running this post-route (not per-net) means each collapse sees
+     every other path's footprint, so a diagonal can't carve through
+     a corridor reserved for a later net.
+  6. Convert the (possibly collapsed) grid path back into `Waypoint`s,
+     fold consecutive same-layer same-direction steps into single
+     segments, and emit a `SignalPath` per net.
 
 This module owns the per-net + per-board orchestration. The primitives
 live in sibling modules:
 
   - `router.grid`     — Grid dataclass + static-blocker build
   - `router.astar`    — A* search + cost weights
-  - `router.blocking` — post-route halo blocking
-  - `router.collapse` — cells → Waypoints (+ dormant 45° collapse)
+  - `router.blocking` — post-route halo blocking (axis + diagonal aware)
+  - `router.collapse` — cells → Waypoints + 45° staircase collapse
   - `router.schedule` — per-net + per-bus routing priority
 """
 
@@ -30,16 +36,33 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
+from dataclasses import dataclass
 
 from board.board import Board
 from board.buses import Net, PinEndpoint, resolve_bus
 from router.astar import _astar
 from router.blocking import _block_path
-from router.collapse import _path_to_waypoints
+from router.collapse import _collapse_quadrant_runs, _path_to_waypoints
 from router.grid import Grid, _build_grid
 from router.paths import waypoints_to_path
 from router.schedule import _net_priority, _ordered_bus_actions
 from vitamins.substrate import SignalPath, Via, WireSegment
+
+
+@dataclass
+class _RawPath:
+    """Per-slave routing output, kept aside for the post-route collapse pass.
+
+    `raw_cells` is the A* output; `own_pin_cells` and `own_pin_xys`
+    snapshot the exemption sets so the post-pass forbidden_check
+    matches A*'s accept rules.
+    """
+
+    name: str
+    raw_cells: list[tuple[int, int, int]]
+    own_pin_cells: set[tuple[int, int, int]]
+    own_pin_xys: set[tuple[float, float]]
+    other_pin_blockers: set[tuple[int, int, int]]
 
 # ---------------------------------------------------------------------------
 # Failure type
@@ -74,7 +97,7 @@ def _route_one_net(
     pin_cells: set[tuple[int, int, int]],
     *,
     parallel_target_cells: set[tuple[int, int, int]] | None = None,
-) -> list[SignalPath]:
+) -> list[tuple[SignalPath, _RawPath]]:
     """Route a single Net as a Steiner-style tree.
 
     Topology:
@@ -158,9 +181,13 @@ def _route_one_net(
                 # them even if some prior blocker landed on the cell.
                 own_pin_cells.add(cell)
 
+    other_pin_blockers = (pin_cells - own_pin_cells) | (
+        other_pin_approach - own_pin_cells
+    )
+
     master_cells = _endpoint_seed_cells(g, net.master)
     trunk_cells: set[tuple[int, int, int]] = set()
-    out: list[SignalPath] = []
+    out: list[tuple[SignalPath, _RawPath]] = []
     for i, slave in enumerate(net.slaves):
         slave_cells = _endpoint_seed_cells(g, slave)
 
@@ -209,16 +236,52 @@ def _route_one_net(
             starts = [cells[-1]]
 
         trunk_cells.update(full_cells)
+        # Don't collapse here — the per-net `g.blocked` state can't see
+        # cells that later nets will need, so an early collapse may
+        # carve a diagonal through a corridor reserved for a future
+        # net. `route_board` runs `_collapse_runs_post_route` after all
+        # nets are halo-blocked.
         waypoints = _path_to_waypoints(g, full_cells)
-        path = waypoints_to_path(
-            f"{net.bus_name}_{net.signal}_{slave.instance_name}", waypoints,
+        name = f"{net.bus_name}_{net.signal}_{slave.instance_name}"
+        path = waypoints_to_path(name, waypoints)
+        raw = _RawPath(
+            name=name,
+            raw_cells=full_cells,
+            own_pin_cells=set(own_pin_cells),
+            own_pin_xys=set(own_pin_xys),
+            other_pin_blockers=set(other_pin_blockers),
         )
-        out.append(path)
+        out.append((path, raw))
         # No intra-net blocking — successive slaves of the same net
         # share the master pin and may re-use each other's trunks.
         # Cross-net halo blocking is applied by `route_board` after the
         # full net (all slaves) has been routed.
     return out
+
+
+def _collapse_one_raw(g: Grid, raw: _RawPath) -> list[tuple[int, int, int]]:
+    """Run the staircase → 45° collapse against the final blocker state.
+
+    `g.blocked` now carries every routed path's halo (including this
+    one's own), so the forbidden_check exempts cells in this path's
+    raw cell list — they're "ours" even though our halo blocked them
+    — alongside the standard pin/approach exemptions.
+    """
+    raw_set = set(raw.raw_cells)
+
+    def _forbidden(ly: int, gy: int, gx: int) -> bool:
+        cell = (ly, gy, gx)
+        if cell in raw_set or cell in raw.own_pin_cells:
+            return False
+        if g.blocked[ly][gy][gx]:
+            return True
+        return cell in raw.other_pin_blockers
+
+    return _collapse_quadrant_runs(
+        raw.raw_cells, g,
+        own_pin_xys=raw.own_pin_xys,
+        forbidden_check=_forbidden,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -252,11 +315,40 @@ def _path_to_cells(g: Grid, path: SignalPath) -> set[tuple[int, int, int]]:
     return cells
 
 
+def _finalise_collapse(
+    g: Grid, raw_paths: list[_RawPath], dims,  # noqa: ANN001 — see route_board
+) -> list[SignalPath]:
+    """Post-route collapse pass: re-emit every path with diagonals where safe.
+
+    Each path's monotonic cardinal staircases fold into 45° diagonals
+    where the final g.blocked state allows. Diagonals are halo-aware:
+    each gets re-blocked via `_block_path` (swept-rectangle halo for
+    diagonal segments) so later diagonals in this pass see them.
+    """
+    out: list[SignalPath] = []
+    for raw in raw_paths:
+        cells = _collapse_one_raw(g, raw)
+        waypoints = _path_to_waypoints(g, cells)
+        path = waypoints_to_path(raw.name, waypoints)
+        # Re-halo with the (possibly diagonal) collapsed geometry so
+        # subsequent collapses in this loop see the new footprint.
+        # The earlier axis-aligned halo for this path's staircase is
+        # already in g.blocked; re-blocking with the diagonal halo
+        # adds (slightly) to the blocked set but never unblocks. The
+        # extra blocking is bounded by the diagonal's swept-rectangle
+        # footprint, which sits inside the staircase's bounding box,
+        # so over-blocking is small.
+        _block_path(g, path, dims)
+        out.append(path)
+    return out
+
+
 def route_board(board: Board, dims) -> list[SignalPath]:
     """Auto-route every bus on the Board. Entry point used by
     `board.build.build_board`. Routes signals as bundled pairs (e.g.
     VCC alongside GND, SCL alongside SDA for I²C) — see
-    `_ordered_bus_actions` for the schedule.
+    `_ordered_bus_actions` for the schedule. Runs the global
+    staircase → 45° collapse as a final pass.
     """
     if not board.buses:
         return []
@@ -264,6 +356,7 @@ def route_board(board: Board, dims) -> list[SignalPath]:
     g, pin_cells = _build_grid(board, dims)
     bound = board.bound_devices()
     paths: list[SignalPath] = []
+    raw_paths: list[_RawPath] = []
 
     for bus in board.buses:
         bus_nets = list(resolve_bus(bus, bound))
@@ -274,7 +367,7 @@ def route_board(board: Board, dims) -> list[SignalPath]:
         for net, target_sig in schedule:
             target_cells = cells_by_signal.get(target_sig) if target_sig else None
             try:
-                net_paths = _route_one_net(
+                net_results = _route_one_net(
                     g, net, pin_cells,
                     parallel_target_cells=target_cells,
                 )
@@ -283,14 +376,16 @@ def route_board(board: Board, dims) -> list[SignalPath]:
                 raise
 
             this_cells: set[tuple[int, int, int]] = set()
-            for p in net_paths:
-                this_cells |= _path_to_cells(g, p)
+            for path, _ in net_results:
+                this_cells |= _path_to_cells(g, path)
             cells_by_signal[net.signal] = this_cells
 
-            for p in net_paths:
-                paths.append(p)
-                _block_path(g, p, dims)
-    return paths
+            for path, raw in net_results:
+                paths.append(path)
+                raw_paths.append(raw)
+                _block_path(g, path, dims)
+
+    return _finalise_collapse(g, raw_paths, dims)
 
 
 def autoroute(
@@ -306,9 +401,11 @@ def autoroute(
     g, pin_cells = _build_grid(board, dims)
     nets_sorted = sorted(nets, key=_net_priority)
     paths: list[SignalPath] = []
+    raw_paths: list[_RawPath] = []
     for net in nets_sorted:
-        net_paths = _route_one_net(g, net, pin_cells)
-        for p in net_paths:
-            paths.append(p)
-            _block_path(g, p, dims)
-    return paths
+        net_results = _route_one_net(g, net, pin_cells)
+        for path, raw in net_results:
+            paths.append(path)
+            raw_paths.append(raw)
+            _block_path(g, path, dims)
+    return _finalise_collapse(g, raw_paths, dims)

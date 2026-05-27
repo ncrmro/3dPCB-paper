@@ -63,7 +63,7 @@ now split into focused modules. Imports flow one way: `autoroute.py`
 | `grid.py` | `Grid` dataclass + `_build_grid`: 0.5 mm 2-layer discretisation of the board, populated with static blockers (edge clearance, device pockets, per-pin "approach corridors"). Also stashes dynamic `_pin_approach_*` attrs on the Grid instance — lifting these into proper fields is a known follow-up. |
 | `astar.py` | `_astar` search + cost weights (`_W_STEP`, `_W_VIA`, `_W_CROSSING`, `_W_EDGE`, `_W_BEND`, `_W_PARALLEL_*`). Cardinal-only moves; optional parallel-mate bonus for bundled pair routing. |
 | `blocking.py` | `_block_path`: post-route halo inflation of a `SignalPath` onto the grid for subsequent nets. Exempts pin approach cells so pins stay reachable. |
-| `collapse.py` | `_path_to_waypoints` (cells → corner Waypoints) and `_collapse_quadrant_runs` (monotonic cardinal staircase → 45° diagonal, **dormant** — wiring needs diagonal-aware blocking). |
+| `collapse.py` | `_path_to_waypoints` (cells → corner Waypoints) and `_collapse_quadrant_runs` (monotonic cardinal staircase → 45° diagonal). Called as a post-route global pass from `route_board` so each collapse sees every other path's halo. |
 | `schedule.py` | `_net_priority` + `_ordered_bus_actions`: route signals in priority order with bundled pair-mate hints (VCC/GND, SCL/SDA). |
 | `paths.py` | `Waypoint` dataclass + `waypoints_to_path` (Waypoints → `SignalPath`). |
 | `score.py` | Route quality scoring used by `bin/score-routes`. |
