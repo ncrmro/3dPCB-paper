@@ -1,0 +1,486 @@
+- generic [active] [ref=e1]:
+  - banner [ref=e2]:
+    - heading "3dPCB-paper gallery" [level=1] [ref=e3]
+    - generic [ref=e5]: 7 substrate part(s) · 6 vitamin(s)
+  - main [ref=e6]:
+    - generic [ref=e7]:
+      - heading "AnchorSCAD substrate (cad)" [level=2] [ref=e9]
+      - generic [ref=e10]:
+        - article [ref=e11] [cursor=pointer]:
+          - link "receptacle_test_coupon Live announcements cad receptacle_test_coupon" [ref=e12]:
+            - /url: /model/cad/receptacle_test_coupon/
+            - generic [ref=e13]:
+              - generic [ref=e14]:
+                - generic [ref=e15]:
+                  - button "receptacle_test_coupon" [ref=e17]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e21]:
+              - generic [ref=e22]: cad
+              - generic [ref=e23]: receptacle_test_coupon
+          - generic [ref=e24]:
+            - button "☆" [ref=e25]
+            - button "⟳" [ref=e26]
+          - generic [ref=e27]:
+            - link "STL" [ref=e28]:
+              - /url: /models/cad/receptacle_test_coupon.stl
+            - generic [ref=e29]: ·
+            - button "Open SCAD" [ref=e30]
+        - article [ref=e31] [cursor=pointer]:
+          - link "substrate_i2c_midline_sensors Live announcements cad substrate_i2c_midline_sensors" [ref=e32]:
+            - /url: /model/cad/substrate_i2c_midline_sensors/
+            - generic [ref=e33]:
+              - generic [ref=e34]:
+                - generic [ref=e35]:
+                  - button "substrate_i2c_midline_sensors" [ref=e37]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e41]:
+              - generic [ref=e42]: cad
+              - generic [ref=e43]: substrate_i2c_midline_sensors
+          - generic [ref=e44]:
+            - button "☆" [ref=e45]
+            - button "⟳" [ref=e46]
+          - generic [ref=e47]:
+            - link "STL" [ref=e48]:
+              - /url: /models/cad/substrate_i2c_midline_sensors.stl
+            - generic [ref=e49]: ·
+            - button "Open SCAD" [ref=e50]
+        - article [ref=e51] [cursor=pointer]:
+          - link "substrate_i2c_sensors_flipped Live announcements cad substrate_i2c_sensors_flipped" [ref=e52]:
+            - /url: /model/cad/substrate_i2c_sensors_flipped/
+            - generic [ref=e53]:
+              - generic [ref=e54]:
+                - generic [ref=e55]:
+                  - button "substrate_i2c_sensors_flipped" [ref=e57]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e61]:
+              - generic [ref=e62]: cad
+              - generic [ref=e63]: substrate_i2c_sensors_flipped
+          - generic [ref=e64]:
+            - button "☆" [ref=e65]
+            - button "⟳" [ref=e66]
+          - generic [ref=e67]:
+            - link "STL" [ref=e68]:
+              - /url: /models/cad/substrate_i2c_sensors_flipped.stl
+            - generic [ref=e69]: ·
+            - button "Open SCAD" [ref=e70]
+        - article [ref=e71] [cursor=pointer]:
+          - link "substrate_i2c_starter Live announcements cad substrate_i2c_starter" [ref=e72]:
+            - /url: /model/cad/substrate_i2c_starter/
+            - generic [ref=e73]:
+              - generic [ref=e74]:
+                - generic [ref=e75]:
+                  - button "substrate_i2c_starter" [ref=e77]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e81]:
+              - generic [ref=e82]: cad
+              - generic [ref=e83]: substrate_i2c_starter
+          - generic [ref=e84]:
+            - button "☆" [ref=e85]
+            - button "⟳" [ref=e86]
+          - generic [ref=e87]:
+            - link "STL" [ref=e88]:
+              - /url: /models/cad/substrate_i2c_starter.stl
+            - generic [ref=e89]: ·
+            - button "Open SCAD" [ref=e90]
+        - article [ref=e91] [cursor=pointer]:
+          - link "esp32_c3_assembly Live announcements cad esp32_c3_assembly" [ref=e92]:
+            - /url: /model/cad/esp32_c3_assembly/
+            - generic [ref=e93]:
+              - generic [ref=e94]:
+                - generic [ref=e95]:
+                  - button "esp32_c3_assembly" [ref=e97]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e101]:
+              - generic [ref=e102]: cad
+              - generic [ref=e103]: esp32_c3_assembly
+          - generic [ref=e104]:
+            - button "☆" [ref=e105]
+            - button "⟳" [ref=e106]
+          - generic [ref=e107]:
+            - link "STL" [ref=e108]:
+              - /url: /models/cad/esp32_c3_assembly.stl
+            - generic [ref=e109]: ·
+            - button "Open SCAD" [ref=e110]
+        - article [ref=e111] [cursor=pointer]:
+          - link "esp32_c3_assembly_exploded Live announcements cad esp32_c3_assembly_exploded" [ref=e112]:
+            - /url: /model/cad/esp32_c3_assembly_exploded/
+            - generic [ref=e113]:
+              - generic [ref=e114]:
+                - generic [ref=e115]:
+                  - button "esp32_c3_assembly_exploded" [ref=e117]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e121]:
+              - generic [ref=e122]: cad
+              - generic [ref=e123]: esp32_c3_assembly_exploded
+          - generic [ref=e124]:
+            - button "☆" [ref=e125]
+            - button "⟳" [ref=e126]
+          - generic [ref=e127]:
+            - link "STL" [ref=e128]:
+              - /url: /models/cad/esp32_c3_assembly_exploded.stl
+            - generic [ref=e129]: ·
+            - button "Open SCAD" [ref=e130]
+        - article [ref=e131] [cursor=pointer]:
+          - link "esp32_c3_carrier Live announcements cad esp32_c3_carrier" [ref=e132]:
+            - /url: /model/cad/esp32_c3_carrier/
+            - generic [ref=e133]:
+              - generic [ref=e134]:
+                - generic [ref=e135]:
+                  - button "esp32_c3_carrier" [ref=e137]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e141]:
+              - generic [ref=e142]: cad
+              - generic [ref=e143]: esp32_c3_carrier
+          - generic [ref=e144]:
+            - button "☆" [ref=e145]
+            - button "⟳" [ref=e146]
+          - generic [ref=e147]:
+            - link "STL" [ref=e148]:
+              - /url: /models/cad/esp32_c3_carrier.stl
+            - generic [ref=e149]: ·
+            - button "Open SCAD" [ref=e150]
+    - generic [ref=e151]:
+      - generic [ref=e152]:
+        - heading "AnchorSCAD vitamins" [level=2] [ref=e153]
+        - generic [ref=e154]: COTS approximations built in Python
+      - generic [ref=e155]:
+        - article [ref=e156] [cursor=pointer]:
+          - link "bh1750_breakout Live announcements vitamin bh1750_breakout" [ref=e157]:
+            - /url: /model/cad/bh1750_breakout/
+            - generic [ref=e158]:
+              - generic [ref=e159]:
+                - generic [ref=e160]:
+                  - button "bh1750_breakout" [ref=e162]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e166]:
+              - generic [ref=e167]: vitamin
+              - generic [ref=e168]: bh1750_breakout
+          - generic [ref=e169]:
+            - button "☆" [ref=e170]
+            - button "⟳" [ref=e171]
+          - generic [ref=e172]:
+            - link "STL" [ref=e173]:
+              - /url: /models/cad/bh1750_breakout.stl
+            - generic [ref=e174]: ·
+            - button "Open SCAD" [ref=e175]
+        - article [ref=e176] [cursor=pointer]:
+          - link "esp32_c3_supermini Live announcements vitamin esp32_c3_supermini" [ref=e177]:
+            - /url: /model/cad/esp32_c3_supermini/
+            - generic [ref=e178]:
+              - generic [ref=e179]:
+                - generic [ref=e180]:
+                  - button "esp32_c3_supermini" [ref=e182]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e186]:
+              - generic [ref=e187]: vitamin
+              - generic [ref=e188]: esp32_c3_supermini
+          - generic [ref=e189]:
+            - button "☆" [ref=e190]
+            - button "⟳" [ref=e191]
+          - generic [ref=e192]:
+            - link "STL" [ref=e193]:
+              - /url: /models/cad/esp32_c3_supermini.stl
+            - generic [ref=e194]: ·
+            - button "Open SCAD" [ref=e195]
+        - article [ref=e196] [cursor=pointer]:
+          - link "scd41_breakout Live announcements vitamin scd41_breakout" [ref=e197]:
+            - /url: /model/cad/scd41_breakout/
+            - generic [ref=e198]:
+              - generic [ref=e199]:
+                - generic [ref=e200]:
+                  - button "scd41_breakout" [ref=e202]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e206]:
+              - generic [ref=e207]: vitamin
+              - generic [ref=e208]: scd41_breakout
+          - generic [ref=e209]:
+            - button "☆" [ref=e210]
+            - button "⟳" [ref=e211]
+          - generic [ref=e212]:
+            - link "STL" [ref=e213]:
+              - /url: /models/cad/scd41_breakout.stl
+            - generic [ref=e214]: ·
+            - button "Open SCAD" [ref=e215]
+    - generic [ref=e216]:
+      - heading "Embodiment pairs" [level=2] [ref=e218]
+      - list [ref=e219]:
+        - listitem [ref=e220]:
+          - link "Stacked vertical spike.kicad_pcb ⇄ scd41_breakout.glb" [ref=e221] [cursor=pointer]:
+            - /url: /embodiment/stacked_vertical/
+            - strong [ref=e222]: Stacked vertical
+            - generic [ref=e223]: spike.kicad_pcb ⇄ scd41_breakout.glb
+    - generic [ref=e224]:
+      - heading "KiCad" [level=2] [ref=e226]
+      - generic [ref=e227]:
+        - article [ref=e228] [cursor=pointer]:
+          - link "Spike — bare board Live announcements kicad Spike — bare board" [ref=e229]:
+            - /url: /model/kicad/spike/
+            - generic [ref=e230]:
+              - generic [ref=e231]:
+                - generic [ref=e232]:
+                  - button "Spike — bare board" [ref=e234]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e238]:
+              - generic [ref=e239]: kicad
+              - generic [ref=e240]: Spike — bare board
+          - generic [ref=e241]:
+            - button "☆" [ref=e242]
+            - button "⟳" [ref=e243]
+          - generic [ref=e244]:
+            - link "STL" [ref=e245]:
+              - /url: /models/kicad/spike.stl
+            - generic [ref=e246]: ·
+            - button "Open KiCad" [ref=e247]
+        - article [ref=e248] [cursor=pointer]:
+          - link "Spike — assembled (PCB + ESP32 + SCD41 + BH1750) Live announcements kicad Spike — assembled (PCB + ESP32 + SCD41 + BH1750)" [ref=e249]:
+            - /url: /model/kicad/spike-assembly/
+            - generic [ref=e250]:
+              - generic [ref=e251]:
+                - generic [ref=e252]:
+                  - button "Spike — assembled (PCB + ESP32 + SCD41 + BH1750)" [ref=e254]
+                  - generic:
+                    - generic:
+                      - generic:
+                        - img
+                - region "Live announcements":
+                  - status
+              - generic:
+                - img:
+                  - generic:
+                    - generic: X
+                    - generic: "Y"
+                    - generic: Z
+            - generic [ref=e258]:
+              - generic [ref=e259]: kicad
+              - generic [ref=e260]: Spike — assembled (PCB + ESP32 + SCD41 + BH1750)
+          - generic [ref=e261]:
+            - button "☆" [ref=e262]
+            - button "⟳" [ref=e263]
+          - generic [ref=e264]:
+            - link "STL" [ref=e265]:
+              - /url: /models/kicad/spike-assembly.stl
+            - generic [ref=e266]: ·
+            - button "Open KiCad" [ref=e267]
+    - generic [ref=e268]:
+      - generic [ref=e269]:
+        - heading "Vitamins / COTS" [level=2] [ref=e270]
+        - generic [ref=e271]: upstream STEP from vendors
+      - generic [ref=e272]:
+        - article [ref=e273] [cursor=pointer]:
+          - generic [ref=e274]:
+            - generic [ref=e275]:
+              - generic [ref=e276]:
+                - button "Adafruit STEMMA QT 5187/5190 (SCD-40 / SCD-41)" [ref=e278]
+                - generic:
+                  - generic:
+                    - generic:
+                      - img
+              - region "Live announcements":
+                - status
+            - generic:
+              - img:
+                - generic:
+                  - generic: X
+                  - generic: "Y"
+                  - generic: Z
+          - generic [ref=e282]:
+            - generic [ref=e283]: vitamin
+            - generic [ref=e284]: Adafruit STEMMA QT 5187/5190 (SCD-40 / SCD-41)
+          - generic [ref=e285]:
+            - button "☆" [ref=e286]
+            - button "⟳" [ref=e287]
+          - generic [ref=e288]:
+            - link "STEP" [ref=e289]:
+              - /url: /models/vitamins/scd40_breakout.step
+            - generic [ref=e290]: ·
+            - generic "upstream license" [ref=e291]: MIT
+        - article [ref=e292] [cursor=pointer]:
+          - generic [ref=e293]:
+            - generic [ref=e294]:
+              - generic [ref=e295]:
+                - button "GY-302 BH1750 breakout" [ref=e297]
+                - generic:
+                  - generic:
+                    - generic:
+                      - img
+              - region "Live announcements":
+                - status
+            - generic:
+              - img:
+                - generic:
+                  - generic: X
+                  - generic: "Y"
+                  - generic: Z
+          - generic [ref=e301]:
+            - generic [ref=e302]: vitamin
+            - generic [ref=e303]: GY-302 BH1750 breakout
+          - generic [ref=e304]:
+            - button "☆" [ref=e305]
+            - button "⟳" [ref=e306]
+          - generic [ref=e307]:
+            - link "STEP" [ref=e308]:
+              - /url: /models/vitamins/BH1750.step
+            - generic [ref=e309]: ·
+            - generic "upstream license" [ref=e310]: GrabCAD ToS
+        - article [ref=e311] [cursor=pointer]:
+          - generic [ref=e312]:
+            - generic [ref=e313]:
+              - generic [ref=e314]:
+                - button "ESP32-C3 SuperMini" [ref=e316]
+                - generic:
+                  - generic:
+                    - generic:
+                      - img
+              - region "Live announcements":
+                - status
+            - generic:
+              - img:
+                - generic:
+                  - generic: X
+                  - generic: "Y"
+                  - generic: Z
+          - generic [ref=e320]:
+            - generic [ref=e321]: vitamin
+            - generic [ref=e322]: ESP32-C3 SuperMini
+          - generic [ref=e323]:
+            - button "☆" [ref=e324]
+            - button "⟳" [ref=e325]
+          - generic [ref=e326]:
+            - link "STEP" [ref=e327]:
+              - /url: /models/vitamins/ESP32-C3-SuperMini.stp
+            - generic [ref=e328]: ·
+            - generic "upstream license" [ref=e329]: unstated
+  - generic [ref=e332]:
+    - button "Menu" [ref=e333]:
+      - img [ref=e335]
+      - generic: Menu
+    - button "Inspect" [ref=e339]:
+      - img [ref=e341]
+      - generic: Inspect
+    - button "Audit" [ref=e343]:
+      - img [ref=e345]
+      - generic: Audit
+    - button "Settings" [ref=e348]:
+      - img [ref=e350]
+      - generic: Settings

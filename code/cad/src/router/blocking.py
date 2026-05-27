@@ -11,7 +11,7 @@ from router.grid import Grid
 from vitamins.substrate import SignalPath, Via, WireSegment
 
 
-def _block_path(g: Grid, path: SignalPath, dims) -> None:
+def _block_path(g: Grid, path: SignalPath, dims) -> set[tuple[int, int, int]]:
     """Inflate a routed path's segments + vias into the grid as blockers
     for subsequent nets. Pin cells and their immediate approach corridors
     are never blocked — pins must remain reachable by their owning net.
@@ -26,14 +26,23 @@ def _block_path(g: Grid, path: SignalPath, dims) -> None:
     Diagonal segments (introduced by `_collapse_quadrant_runs`) rasterise
     at half-grid spacing and halo a square around each sample — a swept
     rectangle that hugs the wire instead of its bounding box.
+
+    Returns the full halo footprint (every in-bounds cell the halo
+    iterated over, *including* pin-approach cells that were skipped
+    when writing to `g.blocked`). The post-route collapse uses this as
+    self-exemption — a path's own corner-brush cells, which sit in its
+    own halo, must not register as forbidden when its staircase
+    collapses to a diagonal.
     """
     halo = dims.channel_width + dims.min_wall_thickness - g.res / 2
     via_halo = dims.via_diameter / 2 + dims.min_wall_thickness
     approach = getattr(g, "_pin_approach_cells", set())
+    footprint: set[tuple[int, int, int]] = set()
 
     def _block_cell(layer: int, gy: int, gx: int) -> None:
         if not g.in_bounds(gx, gy):
             return
+        footprint.add((layer, gy, gx))
         if (layer, gy, gx) in approach:
             return
         g.blocked[layer][gy][gx] = True
@@ -83,3 +92,4 @@ def _block_path(g: Grid, path: SignalPath, dims) -> None:
                         wx, wy = g.to_world(gx, gy)
                         if (wx - elt.position.x) ** 2 + (wy - elt.position.y) ** 2 <= r2:
                             _block_cell(ly, gy, gx)
+    return footprint

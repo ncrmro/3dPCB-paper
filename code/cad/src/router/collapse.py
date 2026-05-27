@@ -19,8 +19,12 @@ from vitamins.substrate import Point2D as SubstratePoint2D
 
 # Minimum axis-aligned approach length to keep at a pin endpoint after
 # collapse. Bare wire can't bend sharply enough to enter a pin barrel at
-# 45° — preserving a short cardinal run lets it drop straight in.
-_PIN_APPROACH_RESIDUAL_MM = 1.5
+# 45° — preserving one grid cell of cardinal run lets it drop straight
+# in. Was 1.5 mm (3 grid cells) — that was conservative enough to
+# swallow whole monotonic-quadrant runs that started at a pin
+# (the ESP32 GND fanout in particular), preventing collapse of an
+# otherwise-clean NW staircase.
+_PIN_APPROACH_RESIDUAL_MM = 0.5
 
 
 def _collapse_quadrant_runs(
@@ -131,15 +135,42 @@ def _collapse_quadrant_runs(
                     if safe:
                         gx += diag_cells * sx
                         gy += diag_cells * sy
+                        # Residual cardinal run after the diagonal.
+                        # Safety-check each cell + the one perpendicular
+                        # neighbour the halo would brush. Without this,
+                        # the residual can land on cells the original
+                        # staircase never visited (different L-corner
+                        # placement) — possibly on another wire or in
+                        # another path's halo.
                         if abs_dgx >= abs_dgy:
                             residual = abs_dgx - diag_cells
                             for k in range(1, residual + 1):
-                                new_middle.append((layer, gy, gx + k * sx))
+                                ngy = gy
+                                ngx = gx + k * sx
+                                for c in ((layer, ngy, ngx),
+                                          (layer, ngy - sy, ngx)):
+                                    if not g.in_bounds(c[2], c[1]) \
+                                            or not cell_safe(*c):
+                                        safe = False
+                                        break
+                                if not safe:
+                                    break
+                                new_middle.append((layer, ngy, ngx))
                         else:
                             residual = abs_dgy - diag_cells
                             for k in range(1, residual + 1):
-                                new_middle.append((layer, gy + k * sy, gx))
-                        if new_middle and new_middle[-1] == B:
+                                ngy = gy + k * sy
+                                ngx = gx
+                                for c in ((layer, ngy, ngx),
+                                          (layer, ngy, ngx - sx)):
+                                    if not g.in_bounds(c[2], c[1]) \
+                                            or not cell_safe(*c):
+                                        safe = False
+                                        break
+                                if not safe:
+                                    break
+                                new_middle.append((layer, ngy, ngx))
+                        if safe and new_middle and new_middle[-1] == B:
                             # Keep the pre/post cardinal segments as-is
                             # so pin approaches stay axis-aligned.
                             result.extend(cells[i + 1:sub_i + 1])

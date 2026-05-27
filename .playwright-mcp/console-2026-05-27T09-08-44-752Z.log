@@ -1,0 +1,37 @@
+[    1226ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/esp32_c3_assembly.glb?v=1779872925193:0
+[    1226ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/esp32_c3_assembly.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1227ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/esp32_c3_supermini.glb?v=1779872925193:0
+[    1227ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/esp32_c3_supermini.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1227ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/scd41_breakout.glb?v=1779872925193:0
+[    1227ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/scd41_breakout.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1228ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/esp32_c3_assembly_exploded.glb?v=1779872925193:0
+[    1228ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/esp32_c3_assembly_exploded.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1228ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/esp32_c3_carrier.glb?v=1779872925193:0
+[    1228ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/esp32_c3_carrier.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1229ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/receptacle_test_coupon.glb?v=1779872925193:0
+[    1229ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/receptacle_test_coupon.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1230ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/substrate_i2c_sensors_flipped.glb?v=1779872925193:0
+[    1230ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/substrate_i2c_sensors_flipped.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1230ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/kicad/spike.glb?v=1779872925193:0
+[    1230ms] [ERROR] tl: fetch for "http://localhost:17280/models/kicad/spike.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1230ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/substrate_i2c_starter.glb?v=1779872925193:0
+[    1230ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/substrate_i2c_starter.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1231ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/kicad/spike-assembly.glb?v=1779872925193:0
+[    1231ms] [ERROR] tl: fetch for "http://localhost:17280/models/kicad/spike-assembly.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1231ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/bh1750_breakout.glb?v=1779872925193:0
+[    1231ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/bh1750_breakout.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1231ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/models/cad/substrate_i2c_midline_sensors.glb?v=1779872925193:0
+[    1232ms] [ERROR] tl: fetch for "http://localhost:17280/models/cad/substrate_i2c_midline_sensors.glb?v=1779872925193" responded with 404: Not Found
+    at https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:22:209505 @ https://unpkg.com/@google/model-viewer@4.2.0/dist/model-viewer.min.js:558
+[    1237ms] [ERROR] Failed to load resource: the server responded with a status of 404 (Not Found) @ http://localhost:17280/favicon.ico:0

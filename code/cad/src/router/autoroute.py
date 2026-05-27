@@ -36,7 +36,7 @@ from __future__ import annotations
 
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from board.board import Board
 from board.buses import Net, PinEndpoint, resolve_bus
@@ -55,7 +55,11 @@ class _RawPath:
 
     `raw_cells` is the A* output; `own_pin_cells` and `own_pin_xys`
     snapshot the exemption sets so the post-pass forbidden_check
-    matches A*'s accept rules.
+    matches A*'s accept rules. `halo_cells` is populated by
+    `route_board` after `_block_path` runs — it carries every cell
+    the path's own halo touches, so the collapse safety check can
+    exempt the corner-brush cells that the diagonal would clip
+    (those sit in our own halo by construction).
     """
 
     name: str
@@ -63,6 +67,7 @@ class _RawPath:
     own_pin_cells: set[tuple[int, int, int]]
     own_pin_xys: set[tuple[float, float]]
     other_pin_blockers: set[tuple[int, int, int]]
+    halo_cells: set[tuple[int, int, int]] = field(default_factory=set)
 
 # ---------------------------------------------------------------------------
 # Failure type
@@ -259,19 +264,33 @@ def _route_one_net(
     return out
 
 
-def _collapse_one_raw(g: Grid, raw: _RawPath) -> list[tuple[int, int, int]]:
+def _collapse_one_raw(
+    g: Grid,
+    raw: _RawPath,
+    exclusive_halo: set[tuple[int, int, int]],
+) -> list[tuple[int, int, int]]:
     """Run the staircase → 45° collapse against the final blocker state.
 
     `g.blocked` now carries every routed path's halo (including this
-    one's own), so the forbidden_check exempts cells in this path's
-    raw cell list — they're "ours" even though our halo blocked them
-    — alongside the standard pin/approach exemptions.
+    one's own). The forbidden_check exempts:
+
+      - `raw_cells` — cells this path actually traverses.
+      - `own_pin_cells` — this net's pin holes + approach corridors.
+      - `exclusive_halo` — cells in *only* this path's halo footprint.
+        Critical: the diagonal's corner-brush cells (the safety-check
+        neighbours of each diagonal-interior cell) sit on the inside
+        of the staircase's L-bend, squarely inside our own halo.
+        Without this exemption no collapse ever fires on a run hemmed
+        in by its own halo. The *exclusive* qualifier matters: cells
+        in our halo *and* another path's halo can't be exempted — a
+        diagonal through them would violate wall-floor against the
+        neighbour wire.
     """
     raw_set = set(raw.raw_cells)
 
     def _forbidden(ly: int, gy: int, gx: int) -> bool:
         cell = (ly, gy, gx)
-        if cell in raw_set or cell in raw.own_pin_cells:
+        if cell in raw_set or cell in raw.own_pin_cells or cell in exclusive_halo:
             return False
         if g.blocked[ly][gy][gx]:
             return True
@@ -325,9 +344,19 @@ def _finalise_collapse(
     each gets re-blocked via `_block_path` (swept-rectangle halo for
     diagonal segments) so later diagonals in this pass see them.
     """
+    # Precompute per-cell halo ownership so each path's collapse can
+    # safely exempt cells it *exclusively* halos (cells shared with
+    # another path's halo stay forbidden — collapsing through them
+    # would close the wall-floor gap to the neighbour wire).
+    owners: dict[tuple[int, int, int], int] = {}
+    for raw in raw_paths:
+        for cell in raw.halo_cells:
+            owners[cell] = owners.get(cell, 0) + 1
+
     out: list[SignalPath] = []
     for raw in raw_paths:
-        cells = _collapse_one_raw(g, raw)
+        exclusive = {c for c in raw.halo_cells if owners.get(c, 0) <= 1}
+        cells = _collapse_one_raw(g, raw, exclusive)
         waypoints = _path_to_waypoints(g, cells)
         path = waypoints_to_path(raw.name, waypoints)
         # Re-halo with the (possibly diagonal) collapsed geometry so
@@ -383,7 +412,7 @@ def route_board(board: Board, dims) -> list[SignalPath]:
             for path, raw in net_results:
                 paths.append(path)
                 raw_paths.append(raw)
-                _block_path(g, path, dims)
+                raw.halo_cells = _block_path(g, path, dims)
 
     return _finalise_collapse(g, raw_paths, dims)
 
@@ -407,5 +436,5 @@ def autoroute(
         for path, raw in net_results:
             paths.append(path)
             raw_paths.append(raw)
-            _block_path(g, path, dims)
+            raw.halo_cells = _block_path(g, path, dims)
     return _finalise_collapse(g, raw_paths, dims)
