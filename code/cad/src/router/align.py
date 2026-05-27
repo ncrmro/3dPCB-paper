@@ -216,14 +216,32 @@ def _shift_run(
     abs_delta = abs(delta)
 
     if run.axis == "H":
-        new_run = [(layer, target_constant, c[2]) for c in cells[run.start_idx:run.end_idx + 1]]
-        first_gx = cells[run.start_idx][2]
-        last_gx = cells[run.end_idx][2]
+        # Detect the full "chain" at this constant gy: walk forward and
+        # backward including any cells (including via layer transitions)
+        # that share gy=run.constant. A trunk bounded by vias on both
+        # ends extends through them to the parallel run on the other
+        # layer — shifting the trunk requires shifting the via Y + the
+        # other-layer run together so the chain stays connected.
+        chain_start = run.start_idx
+        while chain_start > 0 and cells[chain_start - 1][1] == run.constant:
+            chain_start -= 1
+        chain_end = run.end_idx
+        while chain_end + 1 < len(cells) and cells[chain_end + 1][1] == run.constant:
+            chain_end += 1
 
-        prefix = list(cells[:run.start_idx])
+        new_run = [
+            (c[0], target_constant, c[2])
+            for c in cells[chain_start:chain_end + 1]
+        ]
+        first_layer = cells[chain_start][0]
+        first_gx = cells[chain_start][2]
+        last_layer = cells[chain_end][0]
+        last_gx = cells[chain_end][2]
+
+        prefix = list(cells[:chain_start])
         if prefix:
             pre_last = prefix[-1]
-            if pre_last[0] != layer or pre_last[2] != first_gx:
+            if pre_last[0] != first_layer or pre_last[2] != first_gx:
                 return list(cells)
             pre_dir = run.constant - pre_last[1]
             if pre_dir == 0:
@@ -238,35 +256,35 @@ def _shift_run(
                     if trim_idx < 0:
                         return list(cells)
                     c = prefix[trim_idx]
-                    if c[0] != layer or c[2] != first_gx:
+                    if c[0] != first_layer or c[2] != first_gx:
                         return list(cells)
                     trim_idx -= 1
                 prefix = prefix[:trim_idx + 1]
                 if prefix:
                     new_last = prefix[-1]
-                    if (new_last[0] != layer or new_last[2] != first_gx
+                    if (new_last[0] != first_layer or new_last[2] != first_gx
                             or abs(new_last[1] - target_constant) != 1):
                         return list(cells)
             else:
                 # Pre runs the same way as the shift → extend pre by
                 # bridging from its old end to the new corner.
                 bridge = _bridge_cells(
-                    layer, (pre_last[1], pre_last[2]), (target_constant, first_gx),
+                    first_layer, (pre_last[1], pre_last[2]), (target_constant, first_gx),
                 )
                 if bridge and bridge[-1] == new_run[0]:
                     bridge = bridge[:-1]
                 prefix.extend(bridge)
 
         suffix: list[tuple[int, int, int]] = []
-        if run.end_idx + 1 < len(cells):
-            post_first = cells[run.end_idx + 1]
-            if post_first[0] != layer or post_first[2] != last_gx:
+        if chain_end + 1 < len(cells):
+            post_first = cells[chain_end + 1]
+            if post_first[0] != last_layer or post_first[2] != last_gx:
                 return list(cells)
             post_dir = post_first[1] - run.constant
             if post_dir == 0:
                 return list(cells)
             post_sign = 1 if post_dir > 0 else -1
-            tail = list(cells[run.end_idx + 1:])
+            tail = list(cells[chain_end + 1:])
             if post_sign * shift_sign > 0:
                 # Post runs the same way as the shift → trim cells off
                 # the suffix head so the new run end lands on an
@@ -276,22 +294,22 @@ def _shift_run(
                     if trim_idx >= len(tail):
                         return list(cells)
                     c = tail[trim_idx]
-                    if c[0] != layer or c[2] != last_gx:
+                    if c[0] != last_layer or c[2] != last_gx:
                         return list(cells)
                     trim_idx += 1
                 suffix = tail[trim_idx:]
                 if suffix:
                     new_first = suffix[0]
-                    if (new_first[0] != layer or new_first[2] != last_gx
+                    if (new_first[0] != last_layer or new_first[2] != last_gx
                             or abs(new_first[1] - target_constant) != 1):
                         return list(cells)
             else:
                 # Post runs opposite to the shift → extend post.
                 bridge = _bridge_cells(
-                    layer, (target_constant, last_gx), (post_first[1], post_first[2]),
+                    last_layer, (target_constant, last_gx), (post_first[1], post_first[2]),
                 )
                 suffix.extend(bridge)
-                suffix.extend(cells[run.end_idx + 2:])
+                suffix.extend(cells[chain_end + 2:])
 
         return prefix + new_run + suffix
 
