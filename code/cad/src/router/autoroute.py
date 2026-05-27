@@ -74,6 +74,15 @@ class _RawPath:
     own_via_xys: set[tuple[float, float]]
     priority_pin_xys: set[tuple[float, float]]
     other_pin_blockers: set[tuple[int, int, int]]
+    bus_name: str = ""
+    signal: str = ""
+    slave_name: str = ""
+    # When this path is the second-routed member of a bus pair, `partner_signal`
+    # names the first member's signal and `pair_pitch_cells` is the natural
+    # pin pitch in grid cells (master-pin distance). Used by the post-route
+    # pair-mate alignment pass to snap parallel runs to matching offset.
+    partner_signal: str | None = None
+    pair_pitch_cells: int | None = None
     halo_cells: set[tuple[int, int, int]] = field(default_factory=set)
 
 
@@ -123,6 +132,7 @@ def _route_one_net(
     *,
     parallel_target_cells: set[tuple[int, int, int]] | None = None,
     parallel_pitch_cells: int | None = None,
+    partner_signal: str | None = None,
 ) -> list[tuple[SignalPath, _RawPath]]:
     """Route a single Net as a Steiner-style tree.
 
@@ -297,6 +307,11 @@ def _route_one_net(
             own_via_xys=own_via_xys,
             priority_pin_xys=priority_pin_xys,
             other_pin_blockers=set(other_pin_blockers),
+            bus_name=net.bus_name,
+            signal=net.signal,
+            slave_name=slave.instance_name,
+            partner_signal=partner_signal,
+            pair_pitch_cells=parallel_pitch_cells,
         )
         out.append((path, raw))
         # No intra-net blocking — successive slaves of the same net
@@ -417,6 +432,31 @@ def _finalise_collapse(
         for cell in raw.halo_cells:
             owners[cell] = owners.get(cell, 0) + 1
 
+    hard_blocked: set[tuple[int, int, int]] = getattr(g, "_hard_blocked", set())
+
+    def _forbidden_factory(rp: _RawPath):
+        raw_set = set(rp.raw_cells)
+        exclusive = {c for c in rp.halo_cells if owners.get(c, 0) <= 1}
+
+        def _forbidden(ly: int, gy: int, gx: int) -> bool:
+            cell = (ly, gy, gx)
+            if cell in hard_blocked:
+                return True
+            if cell in raw_set or cell in rp.own_pin_cells or cell in exclusive:
+                return False
+            if g.blocked[ly][gy][gx]:
+                return True
+            return cell in rp.other_pin_blockers
+
+        return _forbidden
+
+    # Pair-mate pitch alignment runs on raw cells before per-path
+    # collapse so the resulting WireSegments inherit the corrected
+    # geometry (chamfers + diagonals re-derived against the aligned
+    # cell list).
+    from router.align import align_pair_pitch
+    align_pair_pitch(raw_paths, g, _forbidden_factory)
+
     out: list[SignalPath] = []
     for raw in raw_paths:
         exclusive = {c for c in raw.halo_cells if owners.get(c, 0) <= 1}
@@ -477,6 +517,7 @@ def route_board(board: Board, dims) -> list[SignalPath]:
                     g, net, pin_cells,
                     parallel_target_cells=target_cells,
                     parallel_pitch_cells=pitch_cells,
+                    partner_signal=target_sig,
                 )
             except RouteFailure as exc:
                 exc.partial = tuple(paths)
