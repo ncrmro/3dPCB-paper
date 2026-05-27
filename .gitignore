@@ -41,3 +41,6 @@ code/web/.astro/
 
 # Claude Code per-machine state
 .claude/
+
+# Playwright MCP scratch (browser-automation tool dumps)
+.playwright-mcp/
