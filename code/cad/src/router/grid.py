@@ -214,13 +214,22 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
                 (round(ep.position.x, 3), round(ep.position.y, 3))
             )
 
-    # Pre-compute the L2-pocket footprint for each flat-mounted device.
-    # A flat-mounted device (no header) has its pocket carved into the
-    # top face of the substrate, removing L2 in that region. Pin
-    # approach corridors must NOT extend into the owning device's
-    # pocket on L2 — a wire there would have no substrate to sit on
-    # (the pocket carved it away). On L1 the substrate is intact, so
-    # the wire approaches from underneath via a via.
+    # Pre-compute the L2-pocket forbidden footprint for each
+    # flat-mounted device. A flat-mounted device (no header) has its
+    # pocket carved into the top face of the substrate, removing L2
+    # there. We forbid L2 routing inside the carved pocket *plus*
+    # `channel_width/2` of margin so the wire EDGE (centreline +
+    # channel_width/2) doesn't cross into the pocket. (Adding a full
+    # min_wall_thickness wall on top would be ideal but breaks
+    # routability on tight boards — defer to a board-spec knob if a
+    # specific design needs more wall.)
+    #
+    # Pin approach corridors must NOT extend into this forbidden
+    # region on L2 — a wire there would either float in air (in the
+    # pocket) or partially overhang it (in the margin). On L1 the
+    # substrate is intact, so the wire approaches from underneath via
+    # a via.
+    pocket_margin = dims.pocket_clearance + dims.channel_width / 2
     pocket_by_device: dict[str, Rect] = {}
     for inst in board.devices:
         if inst.header is not None:
@@ -234,8 +243,8 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
         pocket_by_device[inst.name] = Rect(
             cx=inst.position.x + fp.cx,
             cy=inst.position.y + fp.cy,
-            w=w + 2 * dims.pocket_clearance,
-            h=h + 2 * dims.pocket_clearance,
+            w=w + 2 * pocket_margin,
+            h=h + 2 * pocket_margin,
         )
 
     pin_cells: set[tuple[int, int, int]] = set()

@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_starter",
   "spec_path": "specs/i2c_starter.yaml",
   "score": {
-    "total_length_mm": 341.678,
-    "l1_length_mm": 244.899,
-    "l2_length_mm": 96.778,
+    "total_length_mm": 348.849,
+    "l1_length_mm": 258.657,
+    "l2_length_mm": 90.192,
     "via_count": 5,
     "edge_clearance_min_mm": 1.5,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 292.617
+    "aggregate": 289.617
   },
   "invariants": [
     {
@@ -28,7 +28,7 @@
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
       "passed": false,
-      "message": "min cross-net centreline: 1.12 mm (floor 1.40; worst pair primary_SCL \u2194 primary_GND; 9 sample pairs below the floor)"
+      "message": "min cross-net centreline: 1.12 mm (floor 1.40; worst pair primary_SCL \u2194 primary_GND; 7 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
@@ -224,7 +224,7 @@
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": 16.5,
+      "x": 17.0,
       "y": -16.0,
       "diameter": 1.5
     },
@@ -240,7 +240,7 @@
       "source": "via",
       "ref": "primary_VCC_scd41",
       "role": "via",
-      "x": 7.5,
+      "x": 1.0,
       "y": -17.5,
       "diameter": 1.5
     }
