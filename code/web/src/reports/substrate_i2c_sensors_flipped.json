@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_sensors_flipped",
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
-    "total_length_mm": 335.178,
-    "l1_length_mm": 307.435,
+    "total_length_mm": 324.169,
+    "l1_length_mm": 296.426,
     "l2_length_mm": 27.743,
     "via_count": 5,
-    "edge_clearance_min_mm": 1.5,
+    "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 220.331
+    "aggregate": 214.827
   },
   "invariants": [
     {
@@ -22,7 +22,7 @@
       "key": "edge_clearance",
       "label": "Channels \u2265 edge_clearance from board outline",
       "passed": true,
-      "message": "min centreline \u2192 edge: 2.50 mm (threshold 0.40; in primary_GND_scd41)"
+      "message": "min centreline \u2192 edge: 2.00 mm (threshold 0.40; in primary_GND_scd41)"
     },
     {
       "key": "wall_floor",

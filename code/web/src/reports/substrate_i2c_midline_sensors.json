@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_sensors",
   "spec_path": "specs/i2c_midline_sensors.yaml",
   "score": {
-    "total_length_mm": 327.092,
-    "l1_length_mm": 272.935,
+    "total_length_mm": 327.213,
+    "l1_length_mm": 273.056,
     "l2_length_mm": 54.157,
     "via_count": 6,
-    "edge_clearance_min_mm": 1.5,
+    "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 247.703
+    "aggregate": 247.763
   },
   "invariants": [
     {
@@ -22,7 +22,7 @@
       "key": "edge_clearance",
       "label": "Channels \u2265 edge_clearance from board outline",
       "passed": true,
-      "message": "min centreline \u2192 edge: 2.50 mm (threshold 0.40; in primary_GND_scd41)"
+      "message": "min centreline \u2192 edge: 2.00 mm (threshold 0.40; in primary_GND_scd41)"
     },
     {
       "key": "wall_floor",

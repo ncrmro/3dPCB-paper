@@ -162,6 +162,7 @@ def _simplify_wiggles(
         if wiggle_len >= 2 and bends >= min_bends:
             ax, ay = cells[i][2], cells[i][1]
             bx, by = cells[last_j][2], cells[last_j][1]
+            original_segs = bends + 1
 
             # Candidate corner sequences (excluding A and B endpoints).
             # Direct L-bends first (2 segments); then perimeter pushes
@@ -180,19 +181,27 @@ def _simplify_wiggles(
                     if cy != ay and cx != bx:
                         candidates.append([(ax, cy), (bx, cy)])
 
+            # Best = fewest segments (= fewest direction changes), then
+            # fewest cells as a tiebreaker. Visual cleanliness comes
+            # from segment-count drop; cell count is secondary.
             best: list[tuple[int, int, int]] | None = None
+            best_segs = original_segs
             for corners in candidates:
                 points = [(ax, ay), *corners, (bx, by)]
                 walk = try_polyline(layer, points)
                 if walk is None:
                     continue
-                # Compare cell counts: prefer fewer cells. Always at
-                # least one walk shorter than the original wiggle's
-                # cell count (otherwise leave the wiggle alone).
-                if best is None or len(walk) < len(best):
+                walk_segs = len(points) - 1
+                if walk_segs < best_segs or (
+                    walk_segs == best_segs and best is not None and len(walk) < len(best)
+                ):
                     best = walk
+                    best_segs = walk_segs
 
-            if best is not None and len(best) < wiggle_len:
+            # Accept only if we reduced the segment count by at least 2
+            # (one bend is a clean L — replacing a 3-bend wiggle with
+            # another 3-bend shape isn't a real win).
+            if best is not None and best_segs <= original_segs - 2:
                 result.extend(best)
                 i = last_j
                 continue
