@@ -31,6 +31,13 @@ from vitamins.substrate import Point2D as SubstratePoint2D
 # otherwise-clean NW staircase.
 _PIN_APPROACH_RESIDUAL_MM = 0.5
 
+# Same idea at a via: keep at least one cell of axis-aligned run between
+# the via cell and any 45° diagonal so the diagonal can't slice into the
+# via barrel. At 0.5 mm grid res + 0.75 mm via radius, one cell gives
+# ~1.25 mm from via centre to the diagonal start — comfortably outside
+# the 1.5 mm via barrel.
+_VIA_APPROACH_RESIDUAL_MM = 0.5
+
 # Wiggle eliminator knobs. A "wiggle" is a sub-path with multiple
 # direction changes inside a small bounding box — typically the
 # zigzag the router does to escape a dense pin row. The eliminator
@@ -217,6 +224,7 @@ def _collapse_quadrant_runs(
     g: Grid,
     *,
     own_pin_xys: set[tuple[float, float]],
+    own_via_xys: set[tuple[float, float]],
     forbidden_check,
 ) -> list[tuple[int, int, int]]:
     """Rewrite cardinal staircases into 45° diagonals.
@@ -280,14 +288,19 @@ def _collapse_quadrant_runs(
 
         if run_end - i >= 2 and sx != 0 and sy != 0:
             pin_res_cells = int(math.ceil(_PIN_APPROACH_RESIDUAL_MM / g.res))
+            via_res_cells = int(math.ceil(_VIA_APPROACH_RESIDUAL_MM / g.res))
             A_cell = cells[i]
             B_cell = cells[run_end]
             wx_a, wy_a = g.to_world(A_cell[2], A_cell[1])
             wx_b, wy_b = g.to_world(B_cell[2], B_cell[1])
-            a_pin = (round(wx_a, 3), round(wy_a, 3)) in own_pin_xys
-            b_pin = (round(wx_b, 3), round(wy_b, 3)) in own_pin_xys
-            pre = pin_res_cells if a_pin else 0
-            post = pin_res_cells if b_pin else 0
+            xy_a = (round(wx_a, 3), round(wy_a, 3))
+            xy_b = (round(wx_b, 3), round(wy_b, 3))
+            a_pin = xy_a in own_pin_xys
+            b_pin = xy_b in own_pin_xys
+            a_via = xy_a in own_via_xys
+            b_via = xy_b in own_via_xys
+            pre = max(pin_res_cells if a_pin else 0, via_res_cells if a_via else 0)
+            post = max(pin_res_cells if b_pin else 0, via_res_cells if b_via else 0)
             sub_i = i + pre
             sub_end = run_end - post
             if sub_end - sub_i >= 2:

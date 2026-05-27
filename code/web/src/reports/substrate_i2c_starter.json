@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_starter",
   "spec_path": "specs/i2c_starter.yaml",
   "score": {
-    "total_length_mm": 348.849,
+    "total_length_mm": 349.142,
     "l1_length_mm": 258.657,
-    "l2_length_mm": 90.192,
+    "l2_length_mm": 90.485,
     "via_count": 5,
     "edge_clearance_min_mm": 1.5,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 289.617
+    "aggregate": 290.056
   },
   "invariants": [
     {

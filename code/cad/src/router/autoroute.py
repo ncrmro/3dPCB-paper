@@ -70,6 +70,7 @@ class _RawPath:
     raw_cells: list[tuple[int, int, int]]
     own_pin_cells: set[tuple[int, int, int]]
     own_pin_xys: set[tuple[float, float]]
+    own_via_xys: set[tuple[float, float]]
     other_pin_blockers: set[tuple[int, int, int]]
     halo_cells: set[tuple[int, int, int]] = field(default_factory=set)
 
@@ -253,11 +254,20 @@ def _route_one_net(
         waypoints = _path_to_waypoints(g, full_cells)
         name = f"{net.bus_name}_{net.signal}_{slave.instance_name}"
         path = waypoints_to_path(name, waypoints)
+        # Layer transitions in the raw cell list mark via positions —
+        # collapse needs their world xy to keep diagonals from slicing
+        # into the via barrel.
+        own_via_xys: set[tuple[float, float]] = set()
+        for k in range(1, len(full_cells)):
+            if full_cells[k][0] != full_cells[k - 1][0]:
+                vwx, vwy = g.to_world(full_cells[k][2], full_cells[k][1])
+                own_via_xys.add((round(vwx, 3), round(vwy, 3)))
         raw = _RawPath(
             name=name,
             raw_cells=full_cells,
             own_pin_cells=set(own_pin_cells),
             own_pin_xys=set(own_pin_xys),
+            own_via_xys=own_via_xys,
             other_pin_blockers=set(other_pin_blockers),
         )
         out.append((path, raw))
@@ -317,6 +327,7 @@ def _collapse_one_raw(
     return _collapse_quadrant_runs(
         simplified, g,
         own_pin_xys=raw.own_pin_xys,
+        own_via_xys=raw.own_via_xys,
         forbidden_check=_forbidden,
     )
 
