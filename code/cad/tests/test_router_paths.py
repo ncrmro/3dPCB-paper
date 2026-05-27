@@ -7,8 +7,6 @@ constraint on layer transitions.
 
 from __future__ import annotations
 
-import math
-
 import pytest
 
 from router.paths import Waypoint, waypoints_to_path

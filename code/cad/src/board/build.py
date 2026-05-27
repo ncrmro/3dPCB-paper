@@ -10,17 +10,14 @@ autorouter cut into the top + bottom faces.
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass, field
-from typing import Sequence
+from dataclasses import dataclass
 
 import anchorscad as ad
 from anchorscad import datatree
 
 from board.board import Board, DeviceInstance, Level
-from board.devices import Device, Rect
-from board.mounts import Header
+from board.devices import Rect
 from board.pins import Pin, Point2D
-
 
 # ---------------------------------------------------------------------------
 # Built-in dimension defaults
@@ -92,7 +89,8 @@ def _device_pin_positions(inst: DeviceInstance) -> list[tuple[Pin, Point2D]]:
 
 def _rotated_footprint(inst: DeviceInstance) -> Rect:
     """Return the device's footprint translated + rotated into substrate
-    coordinates. Rotation swaps w/h on 90°/270°."""
+    coordinates. Rotation swaps w/h on 90°/270°.
+    """
     fp = inst.resolved_device().footprint
     # The footprint's centre is in device-local coords. Rotate it about
     # the device origin (which sits at the instance.position), then offset.
@@ -117,7 +115,8 @@ def _rotated_footprint(inst: DeviceInstance) -> Rect:
 
 def synthesize_header_levels(board: Board) -> tuple[Level, ...]:
     """For every DeviceInstance with a Header, synthesise a Level for the
-    pedestal that the builder will extrude on top of the base plate."""
+    pedestal that the builder will extrude on top of the base plate.
+    """
     base_top = board.levels[0].z_end
     out: list[Level] = []
     for inst in board.devices:
@@ -361,12 +360,13 @@ class BoardSubstrate(ad.CompositeShape):
 def _route_or_empty(board: Board, dims: ResolvedDims):
     """Call the autorouter if it exists; return [] if there are no nets
     declared. Phase 1 ships without an autorouter; Phase 2 plugs one in
-    by exporting `route_board(board, dims)` from `router.autoroute`."""
+    by exporting `route_board(board, dims)` from `router.autoroute`.
+    """
     nets = board.nets()
     if not nets:
         return []
     try:
-        from router.autoroute import route_board  # noqa: WPS433
+        from router.autoroute import route_board
     except ImportError:
         # Autorouter not implemented yet — build a substrate without
         # carved channels. The Board still extrudes + drills pin holes
@@ -381,6 +381,7 @@ def build_board(board: Board) -> ad.Shape:
     Registers the Board so the shape's build() can find it. If a Board
     with the same name was registered before with different data, this
     overwrites — intentional for the dev loop where re-loading a YAML
-    spec produces a freshly-validated Board object."""
+    spec produces a freshly-validated Board object.
+    """
     _BOARD_REGISTRY[board.name] = board
     return BoardSubstrate(name=board.name)

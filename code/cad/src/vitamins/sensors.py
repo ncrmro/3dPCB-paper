@@ -1,15 +1,14 @@
 """Sensor module dimensions and visual models."""
 
+from dataclasses import field
+
 import anchorscad as ad
 from anchorscad import datatree
-from dataclasses import field
-from typing import Tuple
 
 
 @datatree
 class Scd41Dimensions:
-    """
-    SCD41 CO2 sensor breakout module (measured).
+    """SCD41 CO2 sensor breakout module (measured).
 
     No mounting holes on this breakout board.
     """
@@ -45,8 +44,7 @@ class Scd41Dimensions:
 
 @datatree
 class Bh1750Dimensions:
-    """
-    BH1750 light sensor breakout module (measured).
+    """BH1750 light sensor breakout module (measured).
 
     GY-302 breakout board. Two 3mm mounting holes on the end
     opposite the header (+Y side).
@@ -80,7 +78,7 @@ class Bh1750Dimensions:
     header_body_width: float = 2.54  # mm — single-row header body depth
 
     @property
-    def mounting_holes(self) -> Tuple[Tuple[float, float], ...]:
+    def mounting_holes(self) -> tuple[tuple[float, float], ...]:
         """Returns (x, y) positions of mounting holes relative to PCB center."""
         hw = self.width / 2 - self.hole_inset_x
         hd = self.depth / 2 - self.hole_inset_y

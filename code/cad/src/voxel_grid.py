@@ -28,7 +28,6 @@ import math
 
 from vitamins.substrate import WireSegment
 
-
 # Grid resolution: 0.1 mm gives 8 voxels across an 0.8 mm channel
 # and 5 voxels across a 1.0 mm pin hole — fine enough that two
 # channels laid side-by-side with 0 mm clearance both claim the
@@ -76,7 +75,8 @@ def voxels_in_segment(seg: WireSegment, buffer: float = 0.0):
 
     z is NOT inflated: L1 (substrate bottom) and L2 (substrate top)
     are vertically separated by ~1.4 mm of substrate body, much
-    more than the printable wall floor."""
+    more than the printable wall floor.
+    """
     cw = CHANNEL_WIDTH + 2.0 * buffer
     cd = CHANNEL_DEPTH
     if seg.layer == 1:
@@ -124,7 +124,8 @@ def voxels_in_segment(seg: WireSegment, buffer: float = 0.0):
 def voxels_in_through_hole(cx: float, cy: float, diam: float, buffer: float = 0.0):
     """Yield voxels for a through-hole cylinder inflated by `buffer`
     mm: substrate-bottom to substrate-top, radius (diam/2 + buffer)
-    around (cx, cy)."""
+    around (cx, cy).
+    """
     r = diam / 2 + buffer
     r_sq = r * r
     vxl, vxh = to_vx(cx - r), to_vx(cx + r)
@@ -150,7 +151,8 @@ def voxels_in_pcb_footprint_l2(cx: float, cy: float, half_w: float, half_l: floa
     voxel here would short into the PCB.
 
     See `docs/module_back_conductivity.md` for the conservative-vs-
-    refined model discussion (currently conservative)."""
+    refined model discussion (currently conservative).
+    """
     z_hi = THICKNESS / 2
     z_lo = z_hi - CHANNEL_DEPTH
     vxl, vxh = to_vx(cx - half_w), to_vx(cx + half_w)

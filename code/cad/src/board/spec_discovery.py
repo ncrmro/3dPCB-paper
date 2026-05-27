@@ -12,13 +12,12 @@ Shape registry (via this module).
 
 from __future__ import annotations
 
-import os
 from pathlib import Path
 
 import anchorscad as ad
 from anchorscad import datatree
 
-from board.build import BoardSubstrate, _BOARD_REGISTRY
+from board.build import _BOARD_REGISTRY, BoardSubstrate
 from board.loader import load_board
 
 
@@ -31,7 +30,8 @@ def _specs_dir() -> Path:
 def _make_board_subclass(spec_name: str) -> type:
     """Build a fresh `@ad.shape @datatree` subclass with `spec_name`
     baked in as the default. AnchorSCAD's registry instantiates with
-    no args and keys on the class name."""
+    no args and keys on the class name.
+    """
 
     # Closure-captured spec_name fed through a function default so the
     # class body sees it as a local literal.

@@ -16,7 +16,6 @@ dependencies = [
     "networkx>=3.0",
     "lxml>=5.0",
     "manifold3d>=3.0",
-    "pytest>=8.0",
     "pydantic>=2.0",
     "pyyaml>=6.0",
 ]
@@ -31,3 +30,116 @@ packages = ["src"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 pythonpath = ["src"]
+
+[tool.ruff]
+line-length = 100
+src = ["src", "tests"]
+target-version = "py313"
+
+[tool.ruff.lint]
+# Strict mode: enable every ruff rule by default (`ALL`), then exempt
+# only the families that are genuinely wrong for this codebase, each
+# with a one-line rationale. `B`, `S`, `RUF`, `ANN401` MUST stay
+# enabled — they catch real bugs.
+select = ["ALL"]
+ignore = [
+    # Conflict with `ruff format` — running both would oscillate.
+    "COM812",  # missing-trailing-comma — formatter owns trailing commas
+    "COM819",  # prohibited-trailing-comma — same conflict
+    "ISC001",  # single-line-implicit-string-concatenation — formatter conflict
+    # Project-wide style choices, not enforcement gaps.
+    "CPY",     # flake8-copyrights — no per-file copyright header policy
+    "TD",      # flake8-todos — TODO format opinion not enforced
+    "FIX",     # flake8-fixme — leaves TODO/FIXME tracking to issues
+    # Broader Python module ergonomics that don't fit this layout.
+    "INP001",  # implicit-namespace-package — tests/ deliberately uses
+               # implicit namespace + pythonpath = ["src"] resolution.
+    # Per-call cosmetics that produce noise without wins here.
+    "EM",      # flake8-errmsg — exception message style
+    "TRY003",  # raise-vanilla-args — same rationale as EM
+    # Docstring rules that fight the Google convention configured below.
+    "D203",    # one-blank-line-before-class — conflicts with D211
+    "D213",    # multi-line-summary-second-line — conflicts with D212
+    # Domain comments + docstrings intentionally use unicode glyphs
+    # (°, ×, Δ, ≥, ≤, →) because they describe physical/geometric
+    # operations where the math symbol is the readable form.
+    "RUF002",  # ambiguous-unicode-character-docstring
+    "RUF003",  # ambiguous-unicode-character-comment
+]
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.ruff.lint.pydocstyle]
+convention = "google"
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = ["D", "S101", "PLR2004", "ANN"]
+# The router does dense geometric A* work where math identifiers are
+# the readable form (gx, gy, dx, dy, A, B). Forcing snake_case_long
+# everywhere would harm readability. `_route_one_net`, `_build_grid`,
+# and `_astar` exceed mccabe max-complexity by design — splitting them
+# further would scatter algorithmic state across modules. SLF001 fires
+# on Grid's dynamic `_pin_approach_*` attrs; lifting them into proper
+# fields is tracked but not a blocker.
+"src/router/**" = [
+    "C901",     # complex-function — A* + _route_one_net are inherently
+    "PLR0912",  # too-many-branches — same
+    "PLR0915",  # too-many-statements — same
+    "N806",     # uppercase-vars (A, B endpoint markers in collapse)
+    "E741",     # ambiguous-name (l/I/O — none used; safety net for math)
+    "PLR0913",  # too-many-arguments — _astar parametric knobs
+    "SLF001",   # Grid's dynamic _pin_approach_* attrs (follow-up)
+    "PLR2004",  # magic-value-comparison — rotations 0/90/180/270 etc.
+]
+# CLI scripts: prints are the user interface; orchestration branches
+# are the script's whole point.
+"src/board/cli_*.py" = ["T201", "C901", "PLR0912", "PLR0915", "BLE001"]
+# Board / device geometry: rotations (0, 90, 180, 270) and pin indices
+# are domain constants — flagging them as "magic" is noise.
+"src/board/**" = ["PLR2004"]
+"src/vitamins/**" = ["PLR2004", "N806"]
+# Voxel helpers predate the spec-driven pipeline and are kept only
+# for `apply_chamfers` / collision math; they intentionally use math
+# identifiers (gx, gy, A, B). Defer cleanup until they're either
+# rewired into the new router or removed.
+"src/voxel_*.py" = ["ALL"]
+
+[tool.ty]
+# ty is in preview; pin the schema once it stabilizes.
+
+[tool.ty.environment]
+# cad uses a src/ layout (`from board.foo import` resolves to
+# `cad/src/board/foo.py`). Tell ty where to look — without this,
+# every cross-module import resolves to `unresolved-import`.
+root = ["src"]
+
+[tool.ty.rules]
+# Strict mode: promote every diagnostic that can be promoted to error
+# severity. ty has no single `strict = true` option yet (preview), so
+# this list explicitly raises each warn-level or ignore-level rule
+# whose violation is a real type-soundness gap. Each entry is a
+# deliberate promotion — review when ty stabilizes.
+deprecated = "error"
+possibly-missing-attribute = "error"
+possibly-missing-implicit-call = "error"
+possibly-missing-import = "error"
+possibly-missing-submodule = "error"
+possibly-unresolved-reference = "error"
+redundant-cast = "error"
+unresolved-global = "error"
+unused-awaitable = "error"
+unused-ignore-comment = "error"
+unused-type-ignore-comment = "error"
+ignore-comment-unknown-rule = "error"
+invalid-ignore-comment = "error"
+useless-overload-body = "error"
+ineffective-final = "error"
+invalid-enum-member-annotation = "error"
+invalid-legacy-positional-parameter = "error"
+invalid-named-tuple-override = "error"
+mismatched-type-name = "error"
+redundant-final-classvar = "error"
+unsupported-base = "error"
+ambiguous-protocol-member = "error"
+undefined-reveal = "error"

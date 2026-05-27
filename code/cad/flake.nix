@@ -67,18 +67,34 @@
               pkgs.libxrender
             ]}:$LD_LIBRARY_PATH"
 
-            # Create virtual environment if it doesn't exist
-            if [ ! -d .venv ]; then
-              echo "Creating virtual environment..."
-              uv venv
+            # Anchor uv at the workspace root (code/pyproject.toml). Without
+            # this, `uv sync` from this member dir would treat cad/ as the
+            # project and miss the workspace dev group (ruff/ty/pytest), so
+            # tools get evicted from the shared .venv on every shell entry.
+            _repo_root=""
+            _dir="$PWD"
+            while [ "$_dir" != "/" ]; do
+              if [ -f "$_dir/flake.nix" ] && [ -d "$_dir/code" ]; then
+                _repo_root="$_dir"
+                break
+              fi
+              _dir="$(dirname "$_dir")"
+            done
+            if [ -n "$_repo_root" ]; then
+              export UV_PROJECT="$_repo_root/code"
             fi
+            unset _repo_root _dir
 
-            # Sync dependencies
+            # Sync the entire workspace (cad + future members + dev group).
+            # Without `--all-packages`, uv sync from the workspace root
+            # only installs the root project, leaving cad's runtime deps
+            # (anchorscad, trimesh, …) out of the venv.
             echo "Syncing dependencies..."
-            uv sync --quiet
+            uv sync --quiet --all-packages
 
-            # Activate virtual environment
-            source .venv/bin/activate
+            # Activate the workspace venv so `python`, `pytest`, `ruff`,
+            # `ty` are on PATH directly without an `uv run` prefix.
+            source "$UV_PROJECT/.venv/bin/activate"
 
             echo "Plant Caravan CAD dev shell ready!"
             echo "Run './bin/test' to run tests"

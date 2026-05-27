@@ -14,8 +14,8 @@ dataclass fields is a follow-up.
 
 from __future__ import annotations
 
+from collections.abc import Iterable
 from dataclasses import dataclass, field
-from typing import Iterable
 
 from board.board import Board
 from board.devices import Rect
@@ -46,7 +46,7 @@ class Grid:
     blocked: list[list[list[bool]]] = field(default_factory=list)
 
     @classmethod
-    def from_board(cls, board: Board) -> "Grid":
+    def from_board(cls, board: Board) -> Grid:
         perim = board.levels[0].perimeter
         g = cls(
             x_min=perim.x_min, y_min=perim.y_min,
@@ -83,7 +83,8 @@ class Grid:
         self, rect: Rect, *, inflate: float, layers: Iterable[int]
     ) -> None:
         """Mark every cell inside (rect + inflate) as blocked on the
-        listed layers (0/1 = physical L1/L2)."""
+        listed layers (0/1 = physical L1/L2).
+        """
         x_min = rect.x_min - inflate
         x_max = rect.x_max + inflate
         y_min = rect.y_min - inflate
@@ -99,7 +100,8 @@ class Grid:
         self, cx: float, cy: float, radius: float, layers: Iterable[int]
     ) -> None:
         """Mark every cell whose centre falls within `radius` of (cx, cy)
-        on the listed layers."""
+        on the listed layers.
+        """
         gx_lo, gy_lo = self.to_grid(cx - radius, cy - radius)
         gx_hi, gy_hi = self.to_grid(cx + radius, cy + radius)
         r2 = radius * radius

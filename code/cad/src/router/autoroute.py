@@ -29,7 +29,7 @@ live in sibling modules:
 from __future__ import annotations
 
 import math
-from typing import Sequence
+from collections.abc import Sequence
 
 from board.board import Board
 from board.buses import Net, PinEndpoint, resolve_bus
@@ -41,7 +41,6 @@ from router.paths import waypoints_to_path
 from router.schedule import _net_priority, _ordered_bus_actions
 from vitamins.substrate import SignalPath, Via, WireSegment
 
-
 # ---------------------------------------------------------------------------
 # Failure type
 # ---------------------------------------------------------------------------
@@ -49,7 +48,8 @@ from vitamins.substrate import SignalPath, Via, WireSegment
 
 class RouteFailure(Exception):
     """A net couldn't be routed. Carries the failing net + partial
-    solution so the caller can surface a clear error."""
+    solution so the caller can surface a clear error.
+    """
 
     def __init__(self, net: Net, reason: str, partial: tuple[SignalPath, ...]):
         super().__init__(f"{net.signal} (bus {net.bus_name!r}): {reason}")
@@ -228,7 +228,8 @@ def _route_one_net(
 
 def _path_to_cells(g: Grid, path: SignalPath) -> set[tuple[int, int, int]]:
     """Rasterise every cell touched by a SignalPath. Used to build the
-    `parallel_target_cells` set for the second signal of a pair."""
+    `parallel_target_cells` set for the second signal of a pair.
+    """
     cells: set[tuple[int, int, int]] = set()
     for elt in path.elements:
         if isinstance(elt, WireSegment):
@@ -255,7 +256,8 @@ def route_board(board: Board, dims) -> list[SignalPath]:
     """Auto-route every bus on the Board. Entry point used by
     `board.build.build_board`. Routes signals as bundled pairs (e.g.
     VCC alongside GND, SCL alongside SDA for I²C) — see
-    `_ordered_bus_actions` for the schedule."""
+    `_ordered_bus_actions` for the schedule.
+    """
     if not board.buses:
         return []
 
@@ -299,7 +301,8 @@ def autoroute(
 ) -> list[SignalPath]:
     """Low-level entry point — route a specific net list against a
     Board's geometry. `route_board` is the usual entry that takes the
-    nets straight off the Board."""
+    nets straight off the Board.
+    """
     g, pin_cells = _build_grid(board, dims)
     nets_sorted = sorted(nets, key=_net_priority)
     paths: list[SignalPath] = []

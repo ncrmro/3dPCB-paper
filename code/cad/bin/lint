@@ -1,0 +1,27 @@
+#!/usr/bin/env bash
+# Run ruff (lint) + ty (type-check) on the cad package.
+#
+# Usage:
+#   bin/lint              # check both src and tests
+#   bin/lint --fix        # apply ruff auto-fixes
+#   bin/lint format       # ruff format (writes changes)
+set -uo pipefail
+cd "$(dirname "$0")/.."
+
+case "${1:-}" in
+  format)
+    exec ruff format src tests
+    ;;
+  --fix)
+    ruff check src tests --fix; ruff_rc=$?
+    ty check src;               ty_rc=$?
+    ;;
+  *)
+    ruff check src tests "$@"; ruff_rc=$?
+    ty check src;              ty_rc=$?
+    ;;
+esac
+
+# Exit non-zero if either tool flagged anything, but always run both
+# so the user sees the full picture in one invocation.
+exit $(( ruff_rc | ty_rc ))

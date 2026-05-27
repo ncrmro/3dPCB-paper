@@ -82,7 +82,8 @@ class Device(BaseModel):
 
     def pin_by_role(self, role: str) -> Pin | None:
         """Find the pin with this role (case-insensitive). Returns None
-        if no match — buses use this to detect missing bus signals."""
+        if no match — buses use this to detect missing bus signals.
+        """
         target = role.upper()
         matches = [p for p in self.pins if p.role.upper() == target]
         if not matches:
@@ -125,7 +126,8 @@ DEVICE_REGISTRY: dict[str, Device] = {}
 def register_device(device: Device) -> Device:
     """Register a device under its name. Idempotent on identical re-import
     (same name + same model dump), but rejects two different devices that
-    share a name."""
+    share a name.
+    """
     existing = DEVICE_REGISTRY.get(device.name)
     if existing is not None:
         if existing.model_dump() != device.model_dump():
@@ -158,7 +160,8 @@ def _rotate_then_translate(
 ) -> Point2D:
     """Rotate a device-local point around (0, 0) by `rotation_deg`, then
     translate by `origin`. Rotation is restricted to 90° increments — a
-    Pydantic Literal on DeviceInstance enforces that upstream."""
+    Pydantic Literal on DeviceInstance enforces that upstream.
+    """
     if rotation_deg == 0:
         rx, ry = p.x, p.y
     elif rotation_deg == 90:

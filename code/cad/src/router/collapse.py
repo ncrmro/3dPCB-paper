@@ -155,7 +155,8 @@ def _collapse_quadrant_runs(
 
 def _path_to_waypoints(g: Grid, cells: list[tuple[int, int, int]]) -> list[Waypoint]:
     """Collapse a sequence of unit grid steps into Waypoints at every
-    corner / layer change."""
+    corner / layer change.
+    """
     if not cells:
         return []
 

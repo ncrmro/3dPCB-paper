@@ -30,6 +30,7 @@ def load_board(path: str | Path) -> Board:
 
 def dump_board(board: Board) -> str:
     """Round-trip the Board back to YAML. Used by the gallery's editor +
-    `bin/substrate-report` so an edited spec can be persisted."""
+    `bin/substrate-report` so an edited spec can be persisted.
+    """
     data: dict[str, Any] = board.model_dump(mode="json", exclude_none=True)
     return yaml.safe_dump(data, sort_keys=False, default_flow_style=None)

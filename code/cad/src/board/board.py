@@ -30,7 +30,8 @@ class Level(BaseModel):
 
     `perimeter` is the slab's xy footprint and `z_start < z_end` is its
     vertical extent. v1 only supports rectangular perimeters; the
-    builder raises if a future schema slips in a non-Rect."""
+    builder raises if a future schema slips in a non-Rect.
+    """
 
     model_config = ConfigDict(frozen=True)
 
@@ -40,7 +41,7 @@ class Level(BaseModel):
     z_end: float
 
     @model_validator(mode="after")
-    def _z_ascending(self) -> "Level":
+    def _z_ascending(self) -> Level:
         if self.z_end <= self.z_start:
             raise ValueError(
                 f"Level {self.name!r}: z_end ({self.z_end}) must be > "
@@ -124,7 +125,7 @@ class Board(BaseModel):
     dim: DimOverrides = Field(default_factory=DimOverrides)
 
     @model_validator(mode="after")
-    def _unique_device_names(self) -> "Board":
+    def _unique_device_names(self) -> Board:
         names = [d.name for d in self.devices]
         dupes = {n for n in names if names.count(n) > 1}
         if dupes:
@@ -135,7 +136,7 @@ class Board(BaseModel):
         return self
 
     @model_validator(mode="after")
-    def _buses_reference_known_devices(self) -> "Board":
+    def _buses_reference_known_devices(self) -> Board:
         instance_names = {d.name for d in self.devices}
         for bus in self.buses:
             missing = []
@@ -190,7 +191,8 @@ class Board(BaseModel):
         any bus actually wires up. Used by the builder + reports to
         skip drilling holes for unconnected device pins (e.g. the
         20+ unused ESP32-C3 SuperMini GPIO pins) — drilling them adds
-        print time and weakens the substrate for no functional gain."""
+        print time and weakens the substrate for no functional gain.
+        """
         return {
             (round(ep.position.x, 3), round(ep.position.y, 3))
             for net in self.nets()

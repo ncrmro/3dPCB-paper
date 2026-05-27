@@ -27,8 +27,8 @@ The score is composed of:
 
 from __future__ import annotations
 
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from vitamins.substrate import SignalPath, Via, WireSegment
 
@@ -80,7 +80,8 @@ def _l1_overlap_inside_box(
     """Length of the L1 portion of `seg` whose xy lies inside `box`
     (x_min, y_min, x_max, y_max). Other layers contribute 0; segments
     not crossing the box contribute 0; segments along an axis fully
-    inside the box contribute their full length."""
+    inside the box contribute their full length.
+    """
     if seg.layer != 1:
         return 0.0
     x_min, y_min, x_max, y_max = box
@@ -99,13 +100,11 @@ def _l1_overlap_inside_box(
         if p < 0.0:
             if t > t_hi:
                 return False
-            if t > t_lo:
-                t_lo = t
+            t_lo = max(t_lo, t)
         else:
             if t < t_lo:
                 return False
-            if t < t_hi:
-                t_hi = t
+            t_hi = min(t_hi, t)
         return True
 
     # Liang-Barsky against the rect.

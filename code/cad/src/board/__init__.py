@@ -8,6 +8,15 @@ a 3D-printable substrate.
 Public types are re-exported here so callers do `from board import Board, …`.
 """
 
+# Importing the device library registers every concrete device into
+# DEVICE_REGISTRY at module import time. Importers of `board` get a
+# populated registry without having to know about the per-device files.
+# spec_discovery walks specs/*.yaml and synthesises an AnchorSCAD
+# Shape subclass per Board so the render pipeline finds them.
+from board import (
+    device_library,  # noqa: F401
+    spec_discovery,  # noqa: F401
+)
 from board.board import Board, DeviceInstance, Level, Point2D, Rect
 from board.buses import Bus, Net
 from board.connectors import CONNECTOR_REGISTRY, Connector
@@ -22,20 +31,12 @@ from board.loader import dump_board, load_board
 from board.mounts import Header
 from board.pins import Pin, PinGroup
 
-# Importing the device library registers every concrete device into
-# DEVICE_REGISTRY at module import time. Importers of `board` get a
-# populated registry without having to know about the per-device files.
-from board import device_library  # noqa: F401
-# spec_discovery walks specs/*.yaml and synthesises an AnchorSCAD
-# Shape subclass per Board so the render pipeline finds them.
-from board import spec_discovery  # noqa: F401
-
 __all__ = [
+    "CONNECTOR_REGISTRY",
+    "DEVICE_REGISTRY",
     "Board",
     "Bus",
     "Connector",
-    "CONNECTOR_REGISTRY",
-    "DEVICE_REGISTRY",
     "Device",
     "DeviceInstance",
     "Header",

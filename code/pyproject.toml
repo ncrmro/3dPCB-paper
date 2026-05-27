@@ -3,5 +3,24 @@ name = "3dpcb-paper"
 version = "0.0.0"
 requires-python = ">=3.13"
 
+[tool.uv]
+# `dev` is uv's default group, but list it explicitly so a member-level
+# `uv sync` (the cad flake's shellHook runs from `code/cad/`) also pulls
+# the workspace dev tooling into the shared venv — without this, pytest
+# / ruff / ty get evicted on each shell entry.
+default-groups = ["dev"]
+
 [tool.uv.workspace]
 members = ["cad"]
+
+[dependency-groups]
+# Shared dev tooling — declared once at the workspace root so members
+# resolve to the same binary and version. Per-package dev declarations
+# don't isolate anything in a uv workspace (one shared .venv) but they
+# do create specifier-drift risk when only one package is bumped.
+dev = [
+    "pytest>=9.0.3",
+    "pytest-cov>=7.1.0",
+    "ruff>=0.15.12",
+    "ty>=0.0.32",
+]

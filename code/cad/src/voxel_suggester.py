@@ -30,8 +30,8 @@ belong to the same wire).
 from __future__ import annotations
 
 import math
+from collections.abc import Iterable
 from dataclasses import dataclass
-from typing import Iterable
 
 from vitamins.substrate import Point2D, SignalPath, WireSegment
 from voxel_grid import (
@@ -39,7 +39,6 @@ from voxel_grid import (
     voxels_in_segment,
     voxels_in_through_hole,
 )
-
 
 _SIGNAL_PREFIXES = ("vcc", "gnd", "scl", "sda")
 
@@ -102,7 +101,8 @@ def _max_45_chamfer(
       neither leg fully vanishes — every endpoint keeps at least
       `_CHAMFER_MIN_RESIDUAL_MM` of axis-aligned approach (no 45°
       entry into a pin or via). If c would be < 0.2 mm under this
-      cap, c is returned as 0 (caller filters)."""
+      cap, c is returned as 0 (caller filters).
+    """
     a = _seg_length(s1)
     b = _seg_length(s2)
     c = min(a, b) - _CHAMFER_MIN_RESIDUAL_MM
@@ -120,7 +120,8 @@ def _max_45_chamfer(
 def _is_right_angle(seg1: WireSegment, seg2: WireSegment) -> bool:
     """True iff seg1 and seg2 form a right angle (one runs along a
     coordinate axis, the other along the perpendicular one), are on
-    the same layer, and seg1.end == seg2.start."""
+    the same layer, and seg1.end == seg2.start.
+    """
     if seg1.layer != seg2.layer:
         return False
     if seg1.end != seg2.start:
@@ -172,7 +173,8 @@ def _hole_diameter(sub, name: str) -> float:
 
 def _build_owner_grid(sub) -> dict[tuple[int, int, int], tuple[str, str, str | None]]:
     """Rasterize every existing feature into a voxel-owner dict using
-    `sub._get_signal_paths()` as the wire set."""
+    `sub._get_signal_paths()` as the wire set.
+    """
     return _build_owner_grid_from(sub, sub._get_signal_paths())
 
 
@@ -182,7 +184,8 @@ def _build_owner_grid_from(
 ) -> dict[tuple[int, int, int], tuple[str, str, str | None]]:
     """Rasterize boards, holes, and a given path set into a voxel-owner
     dict. Exposed so chamfer-application can rebuild against the
-    in-progress (partly chamfered) path list."""
+    in-progress (partly chamfered) path list.
+    """
     buffer = sub.dim.min_wall_thickness / 2.0
     owner: dict[tuple[int, int, int], tuple[str, str, str | None]] = {}
 
@@ -219,7 +222,8 @@ def _diagonal_collides(
     different signal, OR with any None-signal owner (board, unrouted
     hole). Voxels already claimed by the diagonal's own original
     L-bend segments are exempt — those are the voxels the chamfer
-    would reclaim."""
+    would reclaim.
+    """
     for v in voxels_in_segment(diagonal, buffer=buffer):
         if v in original_voxels:
             continue
@@ -241,7 +245,8 @@ def find_chamfer_suggestions(sub, paths: Iterable[SignalPath] | None = None) -> 
     `paths` defaults to `sub._get_signal_paths()` — pass an explicit
     list to inspect non-default path sets (e.g. when applying
     chamfers in `apply_chamfers`, the intermediate orthogonal paths
-    must be evaluated, not the post-chamfer ones)."""
+    must be evaluated, not the post-chamfer ones).
+    """
     suggestions: list[ChamferSuggestion] = []
     if paths is None:
         paths = list(sub._get_signal_paths())
@@ -321,7 +326,8 @@ def _chamfer_path_once(
     FIRST safe non-junction L-bend whose 45° chamfer diagonal passes
     the buffer test. Greedy — not globally optimal, but the outer
     loop in `apply_chamfers` iterates until convergence so adjacent
-    chamfer interactions resolve."""
+    chamfer interactions resolve.
+    """
     wire_segs: list[WireSegment] = []
     for elem in path.elements:
         if isinstance(elem, WireSegment):
@@ -397,7 +403,8 @@ def apply_chamfers(sub, paths: Iterable[SignalPath]) -> list[SignalPath]:
 
     Same-signal voxel overlap is allowed; the diagonal only fails if
     it intrudes on a different-signal channel, a foreign pin hole,
-    or a module PCB footprint at the L2 z-band."""
+    or a module PCB footprint at the L2 z-band.
+    """
     paths = list(paths)
     buffer = sub.dim.min_wall_thickness / 2.0
     # Cap iterations — should converge in O(elbows) but be defensive.

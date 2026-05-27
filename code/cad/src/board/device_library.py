@@ -21,7 +21,6 @@ from board.devices import (
 )
 from board.pins import Pin, PinGroup, Point2D
 
-
 _PITCH = 2.54  # standard 0.1" header pitch — every starter device
 
 

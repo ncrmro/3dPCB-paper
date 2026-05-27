@@ -1,17 +1,16 @@
 """ESP32 component dimensions and visual models."""
 
+from dataclasses import field
+
 import anchorscad as ad
 from anchorscad import datatree
-from dataclasses import field
-from typing import List, Tuple
 
 from registry import register_part
 
 
 @datatree
 class Esp32C3SuperminiDimensions:
-    """
-    ESP32-C3 SuperMini MCU module dimensions.
+    """ESP32-C3 SuperMini MCU module dimensions.
 
     User-provided measurements:
     - Width: 18mm
@@ -46,8 +45,7 @@ class Esp32C3SuperminiDimensions:
 
     @property
     def total_height_with_headers(self) -> float:
-        """
-        Total height from bottom of soldered headers to top of USB-C.
+        """Total height from bottom of soldered headers to top of USB-C.
 
         User measured: 12mm total
         """
@@ -61,8 +59,7 @@ class Esp32C3SuperminiDimensions:
 
 @datatree
 class Esp32C3CarrierDimensions:
-    """
-    ESP32-C3 SuperMini Expansion Board (carrier) — VERIFIED from docs.
+    """ESP32-C3 SuperMini Expansion Board (carrier) — VERIFIED from docs.
 
     Source: hardware/docs/ESP32-C3-SuperMini-Expansion-Board.md
     "Compact Size: Measures only 37.4mm x 22.5mm x 15.2mm"

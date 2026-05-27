@@ -1,13 +1,14 @@
 """Part registration system for AnchorSCAD shapes and raw SCAD generators."""
 
-import anchorscad as ad
 import inspect
 import re
-from typing import Dict, Callable, List
+from collections.abc import Callable
+
+import anchorscad as ad
 
 # Registry stores (factory, part_type, scad_format) tuples.
 # scad_format is "anchorscad" (factory returns ad.Shape) or "raw_scad" (factory returns str).
-_PART_REGISTRY: Dict[str, tuple[Callable, str, str]] = {}
+_PART_REGISTRY: dict[str, tuple[Callable, str, str]] = {}
 
 
 def register_part(name: str, part_type: str = "component", scad_format: str = "anchorscad"):
@@ -30,8 +31,7 @@ def camel_to_snake(name):
 
 
 def auto_register_module(module, part_type: str = "component"):
-    """
-    Scans a module for Shape classes and registers them if they have defaults.
+    """Scans a module for Shape classes and registers them if they have defaults.
     """
     for name, obj in inspect.getmembers(module):
         if (
@@ -63,7 +63,7 @@ def auto_register_module(module, part_type: str = "component"):
                 pass
 
 
-def list_parts() -> List[dict]:
+def list_parts() -> list[dict]:
     """Return JSON-serializable list with type from registry."""
     registry = get_registry()
     return [

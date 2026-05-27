@@ -18,9 +18,9 @@ from pathlib import Path
 import pytest
 
 from board import (
+    DEVICE_REGISTRY,
     Board,
     Bus,
-    DEVICE_REGISTRY,
     DeviceInstance,
     Header,
     Level,
@@ -28,11 +28,10 @@ from board import (
     Rect,
     load_board,
 )
-from board.buses import HintWaypoint, RoutingHint
 from board.build import build_board, resolve_dims, synthesize_header_levels
-from router.autoroute import RouteFailure, route_board
+from board.buses import HintWaypoint, RoutingHint
+from router.autoroute import route_board
 from vitamins.substrate import Via, WireSegment
-
 
 SPECS_DIR = Path(__file__).resolve().parent.parent / "specs"
 
@@ -141,7 +140,6 @@ def test_wire_to_wire_wall_floor(board_and_paths):
     would need ripup/reroute or an ILP solver (separate-PR scope).
     """
     import math
-    from collections import defaultdict
 
     board, paths, dims = board_and_paths
     wall_floor = dims.channel_width + dims.min_wall_thickness

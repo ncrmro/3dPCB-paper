@@ -13,8 +13,8 @@ from router.paths import Waypoint, waypoints_to_path
 from router.score import RouteScore, score_paths
 
 __all__ = [
-    "Waypoint",
-    "waypoints_to_path",
     "RouteScore",
+    "Waypoint",
     "score_paths",
+    "waypoints_to_path",
 ]

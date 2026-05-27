@@ -17,8 +17,8 @@ each consecutive waypoint pair must run axis-aligned or at an exact
 from __future__ import annotations
 
 import math
+from collections.abc import Sequence
 from dataclasses import dataclass
-from typing import Sequence
 
 from vitamins.substrate import Point2D, SignalPath, Via, WireSegment
 

@@ -122,7 +122,8 @@ def _inv_wall_floor(board: Board, paths, dims) -> tuple[bool, str]:
     floor — printer will merge them. Below that distance / 2 they'll
     actually short. The greedy router can dip into the advisory band
     in tight pin clusters; we surface the worst case + the count so the
-    user can see the trade-off in the gallery."""
+    user can see the trade-off in the gallery.
+    """
     import math
     wall_floor = dims.channel_width + dims.min_wall_thickness
 
@@ -202,7 +203,7 @@ def _run_invariants(board: Board, paths, dims) -> list[dict]:
     for key, label, fn in suite:
         try:
             passed, msg = fn()
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             passed, msg = False, f"check failed: {exc!r}"
         out.append({"key": key, "label": label, "passed": passed, "message": msg})
     return out
@@ -325,7 +326,7 @@ def main(argv: list[str]) -> int:
     for spec in specs:
         try:
             report = _build_report(spec)
-        except Exception as exc:  # noqa: BLE001
+        except Exception as exc:
             print(f"[substrate-report] skip {spec.name}: {exc}", file=sys.stderr)
             continue
         target = out / f"substrate_{report['name']}.json"

@@ -13,10 +13,8 @@ If you're looking for the old substrate-class authoring path, see
 
 import math
 from dataclasses import dataclass
-from typing import Tuple, Union
 
 import anchorscad as ad
-
 
 # ---------------------------------------------------------------------------
 # Routing data model
@@ -51,7 +49,7 @@ class Via:
 @dataclass(frozen=True)
 class SignalPath:
     name: str
-    elements: Tuple[Union[WireSegment, Via], ...]
+    elements: tuple[WireSegment | Via, ...]
 
 
 # ---------------------------------------------------------------------------

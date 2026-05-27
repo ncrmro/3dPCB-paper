@@ -11,14 +11,14 @@ The router consumes `Net`s, not `Bus`es.
 
 from __future__ import annotations
 
-from dataclasses import dataclass, field
-from typing import Any, Literal, Mapping
+from collections.abc import Mapping
+from dataclasses import dataclass
+from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from board.devices import Device, Microcontroller
 from board.pins import Pin, Point2D
-
 
 # ---------------------------------------------------------------------------
 # Standard signal sets per bus kind
@@ -57,7 +57,8 @@ def bus_signals(kind: str) -> tuple[str, ...]:
 
 def bus_pairs(kind: str) -> tuple[tuple[str, str], ...]:
     """Return the (first, second) pair tuples for this bus kind.
-    Signals not listed in any pair fall through to default ordering."""
+    Signals not listed in any pair fall through to default ordering.
+    """
     return _BUS_PAIRS.get(kind, ())
 
 
@@ -135,7 +136,8 @@ class Bus(BaseModel):
 class PinEndpoint:
     """One end of a Net — the device instance, the pin, and the absolute
     xy on the substrate (already rotated + translated, and projected down
-    through any header to the substrate top)."""
+    through any header to the substrate top).
+    """
 
     instance_name: str
     pin: Pin
@@ -172,7 +174,7 @@ class Net:
 
 def resolve_bus(
     bus: Bus,
-    instances: Mapping[str, "BoundDevice"],
+    instances: Mapping[str, BoundDevice],
 ) -> tuple[Net, ...]:
     """Expand one Bus into one Net per signal.
 
@@ -180,7 +182,8 @@ def resolve_bus(
     knows its absolute pin positions on the substrate). Raises
     `ValueError` with a clear message if the master isn't a
     Microcontroller, if a slave is missing, or if any participant lacks
-    a pin for a required signal."""
+    a pin for a required signal.
+    """
     master_bound = _require_instance(instances, bus.master, role="master")
     if not isinstance(master_bound.device, Microcontroller):
         raise ValueError(
@@ -211,8 +214,8 @@ def resolve_bus(
 
 
 def _require_instance(
-    instances: Mapping[str, "BoundDevice"], name: str, *, role: str
-) -> "BoundDevice":
+    instances: Mapping[str, BoundDevice], name: str, *, role: str
+) -> BoundDevice:
     try:
         return instances[name]
     except KeyError as exc:
@@ -224,7 +227,7 @@ def _require_instance(
 
 
 def _endpoint_or_fail(
-    bound: "BoundDevice", signal: str, bus_name: str, *, role: str
+    bound: BoundDevice, signal: str, bus_name: str, *, role: str
 ) -> PinEndpoint:
     pin = bound.device.pin_by_role(signal)
     if pin is None:

@@ -126,7 +126,7 @@ def _astar(
         h = min(_heuristic(s, goal) for goal in goals)
         heapq.heappush(open_heap, (h, 0.0, s, 0))
 
-    parents: dict[tuple[int, int, int], tuple[int, int, int] | None] = {s: None for s in starts}
+    parents: dict[tuple[int, int, int], tuple[int, int, int] | None] = dict.fromkeys(starts)
 
     while open_heap:
         f, gc, cur, _ = heapq.heappop(open_heap)
