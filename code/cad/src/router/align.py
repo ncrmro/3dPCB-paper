@@ -183,83 +183,181 @@ def _shift_run(
     target_constant: int,
 ) -> list[tuple[int, int, int]]:
     """Return a new cell list with `run`'s cross-axis position shifted
-    to `target_constant`. The cells before `run.start_idx` and after
-    `run.end_idx` are unchanged; cardinal bridge cells are inserted at
-    each end to keep the path connected.
+    to `target_constant`.
 
-    Pre-conditions: cells[run.start_idx - 1] (if exists) shares the
-    same axis-projection coord as cells[run.start_idx], and similarly
-    for the post end. Caller verifies via _adjacent_is_perpendicular.
+    The adjacent perpendicular run on each side is *extended* or
+    *trimmed* depending on its direction relative to the shift:
+
+      * pre direction same sign as shift → bridge cells extend pre to
+        reach the new corner.
+      * pre direction opposite to shift → the new corner is already
+        somewhere inside the existing pre run; trim cells off the tail
+        instead of inserting a U-turn (which the collapse pass would
+        otherwise fold into a visible 0.5 mm diagonal kink).
+      * post direction same sign as shift → trim cells off the suffix
+        head (the new run end now sits past an existing post cell).
+      * post direction opposite to shift → bridge cells extend post.
+
+    Returns the original cell list unchanged if any invariant fails
+    (e.g. adjacent cells not perpendicular, pre run too short to trim).
     """
     if target_constant == run.constant:
         return list(cells)
     layer = run.layer
+    delta = target_constant - run.constant
+    shift_sign = 1 if delta > 0 else -1
+    abs_delta = abs(delta)
+
     if run.axis == "H":
-        # Re-emit run cells at the new gy.
         new_run = [(layer, target_constant, c[2]) for c in cells[run.start_idx:run.end_idx + 1]]
         first_gx = cells[run.start_idx][2]
         last_gx = cells[run.end_idx][2]
-        # Pre bridge: from cells[run.start_idx - 1] to (layer, target_constant, first_gx).
+
         prefix = list(cells[:run.start_idx])
         if prefix:
             pre_last = prefix[-1]
-            # Walk from pre_last to (target_constant, first_gx) cardinally.
-            # Pre_last shares first_gx if the immediately-prior move was
-            # perpendicular (vertical for an H run). Otherwise abort.
             if pre_last[0] != layer or pre_last[2] != first_gx:
-                return list(cells)  # adjacency check failed
-            bridge = _bridge_cells(
-                layer, (pre_last[1], pre_last[2]), (target_constant, first_gx),
-            )
-            # `bridge` includes the destination cell (the new run's first cell).
-            # Drop its last entry so the new run starts cleanly with new_run[0].
-            if bridge and bridge[-1] == new_run[0]:
-                bridge = bridge[:-1]
-            prefix.extend(bridge)
-        # Post bridge: from (layer, target_constant, last_gx) to cells[run.end_idx + 1].
+                return list(cells)
+            pre_dir = run.constant - pre_last[1]
+            if pre_dir == 0:
+                return list(cells)
+            pre_sign = 1 if pre_dir > 0 else -1
+            if pre_sign * shift_sign < 0:
+                # Pre runs opposite to the shift → trim cells off the
+                # prefix tail so the new corner lands on an existing
+                # pre cell (no U-turn).
+                trim_idx = len(prefix) - 1
+                for _ in range(abs_delta):
+                    if trim_idx < 0:
+                        return list(cells)
+                    c = prefix[trim_idx]
+                    if c[0] != layer or c[2] != first_gx:
+                        return list(cells)
+                    trim_idx -= 1
+                prefix = prefix[:trim_idx + 1]
+                if prefix:
+                    new_last = prefix[-1]
+                    if (new_last[0] != layer or new_last[2] != first_gx
+                            or abs(new_last[1] - target_constant) != 1):
+                        return list(cells)
+            else:
+                # Pre runs the same way as the shift → extend pre by
+                # bridging from its old end to the new corner.
+                bridge = _bridge_cells(
+                    layer, (pre_last[1], pre_last[2]), (target_constant, first_gx),
+                )
+                if bridge and bridge[-1] == new_run[0]:
+                    bridge = bridge[:-1]
+                prefix.extend(bridge)
+
         suffix: list[tuple[int, int, int]] = []
         if run.end_idx + 1 < len(cells):
             post_first = cells[run.end_idx + 1]
             if post_first[0] != layer or post_first[2] != last_gx:
-                return list(cells)  # adjacency check failed
-            bridge = _bridge_cells(
-                layer, (target_constant, last_gx), (post_first[1], post_first[2]),
-            )
-            # `bridge` ends with post_first; the original cells[run.end_idx+1:]
-            # starts with post_first, so we use bridge as-is and skip the first
-            # element of the tail.
-            suffix.extend(bridge)
-            suffix.extend(cells[run.end_idx + 2:])
-        else:
-            # Run was the path's tail — no post bridge.
-            pass
-        return prefix + new_run + suffix
-    else:  # V
-        new_run = [(layer, c[1], target_constant) for c in cells[run.start_idx:run.end_idx + 1]]
-        first_gy = cells[run.start_idx][1]
-        last_gy = cells[run.end_idx][1]
-        prefix = list(cells[:run.start_idx])
-        if prefix:
-            pre_last = prefix[-1]
-            if pre_last[0] != layer or pre_last[1] != first_gy:
                 return list(cells)
+            post_dir = post_first[1] - run.constant
+            if post_dir == 0:
+                return list(cells)
+            post_sign = 1 if post_dir > 0 else -1
+            tail = list(cells[run.end_idx + 1:])
+            if post_sign * shift_sign > 0:
+                # Post runs the same way as the shift → trim cells off
+                # the suffix head so the new run end lands on an
+                # existing post cell.
+                trim_idx = 0
+                for _ in range(abs_delta):
+                    if trim_idx >= len(tail):
+                        return list(cells)
+                    c = tail[trim_idx]
+                    if c[0] != layer or c[2] != last_gx:
+                        return list(cells)
+                    trim_idx += 1
+                suffix = tail[trim_idx:]
+                if suffix:
+                    new_first = suffix[0]
+                    if (new_first[0] != layer or new_first[2] != last_gx
+                            or abs(new_first[1] - target_constant) != 1):
+                        return list(cells)
+            else:
+                # Post runs opposite to the shift → extend post.
+                bridge = _bridge_cells(
+                    layer, (target_constant, last_gx), (post_first[1], post_first[2]),
+                )
+                suffix.extend(bridge)
+                suffix.extend(cells[run.end_idx + 2:])
+
+        return prefix + new_run + suffix
+
+    # V axis: same logic with gx/gy roles swapped.
+    new_run = [(layer, c[1], target_constant) for c in cells[run.start_idx:run.end_idx + 1]]
+    first_gy = cells[run.start_idx][1]
+    last_gy = cells[run.end_idx][1]
+
+    prefix = list(cells[:run.start_idx])
+    if prefix:
+        pre_last = prefix[-1]
+        if pre_last[0] != layer or pre_last[1] != first_gy:
+            return list(cells)
+        pre_dir = run.constant - pre_last[2]
+        if pre_dir == 0:
+            return list(cells)
+        pre_sign = 1 if pre_dir > 0 else -1
+        if pre_sign * shift_sign < 0:
+            trim_idx = len(prefix) - 1
+            for _ in range(abs_delta):
+                if trim_idx < 0:
+                    return list(cells)
+                c = prefix[trim_idx]
+                if c[0] != layer or c[1] != first_gy:
+                    return list(cells)
+                trim_idx -= 1
+            prefix = prefix[:trim_idx + 1]
+            if prefix:
+                new_last = prefix[-1]
+                if (new_last[0] != layer or new_last[1] != first_gy
+                        or abs(new_last[2] - target_constant) != 1):
+                    return list(cells)
+        else:
             bridge = _bridge_cells(
                 layer, (pre_last[1], pre_last[2]), (first_gy, target_constant),
             )
             if bridge and bridge[-1] == new_run[0]:
                 bridge = bridge[:-1]
             prefix.extend(bridge)
-        suffix = []
-        if run.end_idx + 1 < len(cells):
-            post_first = cells[run.end_idx + 1]
-            if post_first[0] != layer or post_first[1] != last_gy:
-                return list(cells)
+
+    suffix = []
+    if run.end_idx + 1 < len(cells):
+        post_first = cells[run.end_idx + 1]
+        if post_first[0] != layer or post_first[1] != last_gy:
+            return list(cells)
+        post_dir = post_first[2] - run.constant
+        if post_dir == 0:
+            return list(cells)
+        post_sign = 1 if post_dir > 0 else -1
+        tail = list(cells[run.end_idx + 1:])
+        if post_sign * shift_sign > 0:
+            trim_idx = 0
+            for _ in range(abs_delta):
+                if trim_idx >= len(tail):
+                    return list(cells)
+                c = tail[trim_idx]
+                if c[0] != layer or c[1] != last_gy:
+                    return list(cells)
+                trim_idx += 1
+            suffix = tail[trim_idx:]
+            if suffix:
+                new_first = suffix[0]
+                if (new_first[0] != layer or new_first[1] != last_gy
+                        or abs(new_first[2] - target_constant) != 1):
+                    return list(cells)
+        else:
             bridge = _bridge_cells(
                 layer, (last_gy, target_constant), (post_first[1], post_first[2]),
             )
             suffix.extend(bridge)
             suffix.extend(cells[run.end_idx + 2:])
-        return prefix + new_run + suffix
+
+    return prefix + new_run + suffix
 
 
 def _cells_safe(
