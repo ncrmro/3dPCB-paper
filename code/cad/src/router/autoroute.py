@@ -81,6 +81,12 @@ class _RawPath:
 # / second bend off the pin (when surrounding space permits). Bare
 # copper snags on 90° bends; power/ground wires are routed against
 # tight pin clusters and benefit most from the smoother corner.
+# TODO: this hard-coded signal-name set is bespoke. The chamfer should
+# fire automatically wherever the geometry supports it — driven by
+# surrounding open quadrant size and wire gauge, not by net name —
+# so I²C buses, GPIO fan-outs, etc. all benefit without an allow-list.
+# Consequence of leaving as-is: only the listed power/ground nets get
+# the elegant corner; every other signal still ships with 90° bends.
 _PRIORITY_CHAMFER_SIGNALS: frozenset[str] = frozenset({"VCC", "3V3", "5V", "GND"})
 
 # ---------------------------------------------------------------------------
@@ -116,6 +122,7 @@ def _route_one_net(
     pin_cells: set[tuple[int, int, int]],
     *,
     parallel_target_cells: set[tuple[int, int, int]] | None = None,
+    parallel_pitch_cells: int | None = None,
 ) -> list[tuple[SignalPath, _RawPath]]:
     """Route a single Net as a Steiner-style tree.
 
@@ -234,6 +241,7 @@ def _route_one_net(
                 extra_blocked=other_pin_approach - own_pin_cells,
                 layer_step_mul=layer_step_mul,
                 parallel_target_cells=parallel_target_cells,
+                parallel_pitch_cells=parallel_pitch_cells,
             )
             if cells is None:
                 where = (
@@ -451,10 +459,24 @@ def route_board(board: Board, dims) -> list[SignalPath]:
 
         for net, target_sig in schedule:
             target_cells = cells_by_signal.get(target_sig) if target_sig else None
+            pitch_cells = None
+            if target_sig is not None:
+                target_net = nets_by_signal.get(target_sig)
+                if target_net is not None:
+                    # Master-pin pitch on the controller IC (e.g. SCL/SDA
+                    # adjacent on ESP32 J1B). The parallel-bonus band is
+                    # centred on this pitch so the second signal runs at
+                    # the SAME spacing the partners have on the IC,
+                    # instead of crowding closer for a marginal discount.
+                    dx = net.master.position.x - target_net.master.position.x
+                    dy = net.master.position.y - target_net.master.position.y
+                    pitch_mm = abs(dx) + abs(dy)
+                    pitch_cells = max(1, round(pitch_mm / g.res))
             try:
                 net_results = _route_one_net(
                     g, net, pin_cells,
                     parallel_target_cells=target_cells,
+                    parallel_pitch_cells=pitch_cells,
                 )
             except RouteFailure as exc:
                 exc.partial = tuple(paths)

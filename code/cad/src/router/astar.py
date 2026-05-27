@@ -36,6 +36,12 @@ _PARALLEL_MIN = 2         # Min Manhattan-distance for the parallel
                           # second signal into the first's pin-approach
                           # corridor, where halos are by design relaxed.
 _PARALLEL_MAX = 5         # Max Manhattan-distance for the bonus.
+# Tolerance (in cells) around the caller-supplied `parallel_pitch_cells`.
+# When pitch is known (master pin pitch on the controller IC) the bonus
+# only fires inside [pitch-tol, pitch+tol]; cells closer than pitch get
+# no bonus, so A* won't crowd the second signal closer than the natural
+# pin pitch and won't introduce small Y jogs to claim a shorter offset.
+_PARALLEL_PITCH_TOL = 1
 
 _MOVES = [
     (1,  0,  0), (-1, 0,  0),
@@ -75,6 +81,7 @@ def _astar(
     extra_blocked: set[tuple[int, int, int]] = frozenset(),
     layer_step_mul: tuple[float, float] = (1.0, 1.0),
     parallel_target_cells: set[tuple[int, int, int]] | None = None,
+    parallel_pitch_cells: int | None = None,
 ) -> list[tuple[int, int, int]] | None:
     """A* on the (layer, gy, gx) grid.
 
@@ -104,19 +111,35 @@ def _astar(
     # bonus would pull the second signal into the first's pin row at
     # wall-floor-violating distance. The bonus applies only in "open"
     # board space between corridors.
+    # When the caller supplies the natural pin-pitch of the pair (master-
+    # pin distance in cells), centre the bonus band on that pitch ±tol.
+    # That keeps the second signal at *matching* spacing and removes the
+    # incentive to crowd closer than the IC's own pin column.
+    if parallel_pitch_cells is not None:
+        p_min = max(_PARALLEL_MIN, parallel_pitch_cells - _PARALLEL_PITCH_TOL)
+        p_max = parallel_pitch_cells + _PARALLEL_PITCH_TOL
+    else:
+        p_min = _PARALLEL_MIN
+        p_max = _PARALLEL_MAX
     near_parallel: set[tuple[int, int, int]] = set()
     if parallel_target_cells:
         all_approach = getattr(g, "_pin_approach_cells", set())
+        # Own-net approach corridors are the pin-exit rows for THIS
+        # signal — exactly where we want the parallel bonus to fire so
+        # the pair leaves the IC at matching pitch. Excluding only
+        # *other* nets' approach corridors keeps the wall-floor
+        # protection intact without erasing the natural pin row.
+        other_approach = all_approach - own_pin_cells
         target_set = parallel_target_cells
         for (ly, gy, gx) in target_set:
-            for dy in range(-_PARALLEL_MAX, _PARALLEL_MAX + 1):
-                rem = _PARALLEL_MAX - abs(dy)
+            for dy in range(-p_max, p_max + 1):
+                rem = p_max - abs(dy)
                 for dx in range(-rem, rem + 1):
                     dist = abs(dx) + abs(dy)
-                    if dist < _PARALLEL_MIN:
+                    if dist < p_min:
                         continue
                     cell = (ly, gy + dy, gx + dx)
-                    if cell in all_approach:
+                    if cell in other_approach:
                         continue
                     near_parallel.add(cell)
         near_parallel -= target_set
