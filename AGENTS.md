@@ -14,19 +14,19 @@ declarative artifact. Demonstration target: ESP32-C3 Supermini + SCD41
 - `docs/plan.md` — phased plan for the spike CAD compiler.
 - `docs/plants/` — weekly plan snapshots (e.g. `W20-demoable-paper.md`).
 - `docs/kicad/` — KiCad workflow notes (e.g. `images.md`: rendering boards).
-- `code/` — all source code. Houses the uv + bun workspace roots.
+- `code/` — all source code. uv workspace root + bun workspace root.
+  See [`code/AGENTS.md`](code/AGENTS.md) for the workspace plumbing,
+  cad/ source layout, and router module breakdown.
   - `code/kicad/` — canonical electrical design (`spike.kicad_sch` +
     `spike.kicad_pcb`) plus a `placements/` directory of 3D placement
     sidecars (YAML keyed by reference designator). Own `flake.nix`.
-  - `code/cad/` — substrate compiler (own `flake.nix`,
-    `pyproject.toml`, `.venv`).
-    - `src/vitamins/` — COTS module 3D models (`esp32.py`, `sensors.py`),
-      copied verbatim from `ncrmro/plant-caravan/hardware/cad/src/vitamins/`
-      so changes can be diffed back upstream.
-    - `src/registry.py` — part registration for AnchorSCAD shapes / raw SCAD.
-    - `bin/render` — renders registered parts to `.scad` under `code/cad/build/`.
-  - `code/web/` — bun + astro gallery (planned; see
-    `docs/plants/W20-demoable-paper.md`).
+  - `code/cad/` — substrate compiler. uv workspace member; shared venv
+    at `code/.venv/`. Own `flake.nix`, `pyproject.toml`. Source under
+    `src/`: `board/` (declarative model + CLI entry points), `router/`
+    (A* auto-router split into 8 focused modules), `vitamins/` (COTS
+    module models mirrored from plant-caravan), `voxel_*.py` (legacy
+    chamfer/collision helpers).
+  - `code/web/` — bun + astro gallery.
 - `.deepwork/` — DeepWork workflow metadata.
 
 ## Workflow: KiCad-first
