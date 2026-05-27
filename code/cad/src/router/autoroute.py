@@ -291,9 +291,17 @@ def _collapse_one_raw(
         neighbour wire.
     """
     raw_set = set(raw.raw_cells)
+    hard_blocked: set[tuple[int, int, int]] = getattr(g, "_hard_blocked", set())
 
     def _forbidden(ly: int, gy: int, gx: int) -> bool:
         cell = (ly, gy, gx)
+        # Hard blockers (pocket interior, edge clearance) are physical
+        # impossibilities — no substrate, no carve. They must NEVER be
+        # exempted, even when in our own halo. Pin cells stay routable
+        # because they're not in `_hard_blocked` (the pin cell exemption
+        # already happened when pockets were carved into g.blocked).
+        if cell in hard_blocked:
+            return True
         if cell in raw_set or cell in raw.own_pin_cells or cell in exclusive_halo:
             return False
         if g.blocked[ly][gy][gx]:

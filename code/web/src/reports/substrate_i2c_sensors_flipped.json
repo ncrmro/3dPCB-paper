@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_sensors_flipped",
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
-    "total_length_mm": 324.169,
-    "l1_length_mm": 296.426,
-    "l2_length_mm": 27.743,
+    "total_length_mm": 324.755,
+    "l1_length_mm": 299.926,
+    "l2_length_mm": 24.828,
     "via_count": 5,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 214.827
+    "aggregate": 212.206
   },
   "invariants": [
     {
@@ -230,18 +230,18 @@
     },
     {
       "source": "via",
-      "ref": "primary_VCC_bh1750",
+      "ref": "primary_VCC_scd41",
       "role": "via",
-      "x": 10.5,
-      "y": 4.0,
+      "x": 1.5,
+      "y": 6.5,
       "diameter": 1.5
     },
     {
       "source": "via",
       "ref": "primary_VCC_scd41",
       "role": "via",
-      "x": 1.5,
-      "y": 6.5,
+      "x": 10.5,
+      "y": 7.5,
       "diameter": 1.5
     }
   ]

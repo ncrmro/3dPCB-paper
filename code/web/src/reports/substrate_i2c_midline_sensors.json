@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_sensors",
   "spec_path": "specs/i2c_midline_sensors.yaml",
   "score": {
-    "total_length_mm": 327.213,
-    "l1_length_mm": 273.056,
-    "l2_length_mm": 54.157,
-    "via_count": 6,
+    "total_length_mm": 331.006,
+    "l1_length_mm": 277.678,
+    "l2_length_mm": 53.328,
+    "via_count": 8,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 247.763
+    "aggregate": 258.831
   },
   "invariants": [
     {
@@ -34,7 +34,7 @@
       "key": "drilled_holes_match_vias",
       "label": "Every via has a drilled hole; no orphans",
       "passed": true,
-      "message": "22 holes \u2014 every via lands on a drilled position"
+      "message": "24 holes \u2014 every via lands on a drilled position"
     },
     {
       "key": "endpoints_connected",
@@ -206,6 +206,14 @@
     },
     {
       "source": "via",
+      "ref": "primary_GND_bh1750",
+      "role": "via",
+      "x": 21.5,
+      "y": 2.0,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
       "ref": "primary_GND_scd41",
       "role": "via",
       "x": -3.0,
@@ -216,8 +224,8 @@
       "source": "via",
       "ref": "primary_GND_scd41",
       "role": "via",
-      "x": 13.0,
-      "y": 3.5,
+      "x": 16.5,
+      "y": 0.5,
       "diameter": 1.5
     },
     {
@@ -249,6 +257,14 @@
       "ref": "primary_VCC_scd41",
       "role": "via",
       "x": 4.5,
+      "y": 2.0,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_VCC_scd41",
+      "role": "via",
+      "x": 10.5,
       "y": 2.0,
       "diameter": 1.5
     }

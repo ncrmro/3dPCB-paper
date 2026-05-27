@@ -214,6 +214,30 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
                 (round(ep.position.x, 3), round(ep.position.y, 3))
             )
 
+    # Pre-compute the L2-pocket footprint for each flat-mounted device.
+    # A flat-mounted device (no header) has its pocket carved into the
+    # top face of the substrate, removing L2 in that region. Pin
+    # approach corridors must NOT extend into the owning device's
+    # pocket on L2 — a wire there would have no substrate to sit on
+    # (the pocket carved it away). On L1 the substrate is intact, so
+    # the wire approaches from underneath via a via.
+    pocket_by_device: dict[str, Rect] = {}
+    for inst in board.devices:
+        if inst.header is not None:
+            continue
+        device = inst.resolved_device()
+        fp = device.footprint
+        if inst.rotation in (0, 180):
+            w, h = fp.w, fp.h
+        else:
+            w, h = fp.h, fp.w
+        pocket_by_device[inst.name] = Rect(
+            cx=inst.position.x + fp.cx,
+            cy=inst.position.y + fp.cy,
+            w=w + 2 * dims.pocket_clearance,
+            h=h + 2 * dims.pocket_clearance,
+        )
+
     pin_cells: set[tuple[int, int, int]] = set()
     pin_approach_by_pin: dict[
         tuple[float, float], set[tuple[int, int, int]]
@@ -223,6 +247,7 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     ] = {}
     for inst in board.devices:
         device = inst.resolved_device()
+        own_pocket = pocket_by_device.get(inst.name)
         for pin in device.pins:
             abs_pos = device.pin_position_at(inst.position, inst.rotation, pin)
             gx, gy = g.to_grid(abs_pos.x, abs_pos.y)
@@ -245,8 +270,19 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
                 for ddx, ddy in axes:
                     for k in range(1, APPROACH_DEPTH + 1):
                         nx, ny = gx + ddx * k, gy + ddy * k
-                        if g.in_bounds(nx, ny):
-                            approach.add((ly, ny, nx))
+                        if not g.in_bounds(nx, ny):
+                            continue
+                        # L2 approach can't extend into our own pocket:
+                        # the substrate is carved away there, so a wire
+                        # on L2 would have nothing to sit on. Force the
+                        # approach to come via L1 instead (which the
+                        # via from L2 naturally provides at the pin).
+                        if ly == 1 and own_pocket is not None:
+                            wx, wy = g.to_world(nx, ny)
+                            if (own_pocket.x_min <= wx <= own_pocket.x_max
+                                    and own_pocket.y_min <= wy <= own_pocket.y_max):
+                                continue
+                        approach.add((ly, ny, nx))
             # For dense pins also reserve the immediate parallel-axis
             # neighbours as part of the owning net's approach — own
             # net can traverse them, but other nets' `extra_blocked`
@@ -284,34 +320,35 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     g._pin_approach_by_pin = pin_approach_by_pin
     g._pin_buffer_by_pin = pin_buffer_by_pin
 
+    # Hard blockers — cells the post-route collapse must NEVER step on,
+    # even when they sit inside the path's own exclusive halo. These
+    # are physical impossibilities (no substrate, or board edge), not
+    # neighbour-wire halos. Populated below as pockets + edge strips
+    # get blocked.
+    hard_blocked: set[tuple[int, int, int]] = set()
+    for ly in (0, 1):
+        for gy in range(g.ny):
+            for gx in range(g.nx):
+                if g.blocked[ly][gy][gx]:
+                    hard_blocked.add((ly, gy, gx))
+
     # Device pockets — for flat-mounted devices, the pocket cuts away
     # the top face of the substrate, so L2 (top) channels can't pass
-    # through the pocket xy. L1 stays clear unless the pin row sits in
-    # the pocket. We block the pocket xy on L2 only (L1 keeps routes
-    # available under the device for short escapes). Pin approach cells
-    # are explicitly excluded so each pin remains reachable from at
-    # least one cardinal direction on each layer.
-    for inst in board.devices:
-        device = inst.resolved_device()
-        fp = device.footprint
-        if inst.rotation in (0, 180):
-            w, h = fp.w, fp.h
-        else:
-            w, h = fp.h, fp.w
-        pocket = Rect(
-            cx=inst.position.x + fp.cx,
-            cy=inst.position.y + fp.cy,
-            w=w + 2 * dims.pocket_clearance,
-            h=h + 2 * dims.pocket_clearance,
-        )
-        if inst.header is None:
-            gx_lo, gy_lo = g.to_grid(pocket.x_min, pocket.y_min)
-            gx_hi, gy_hi = g.to_grid(pocket.x_max, pocket.y_max)
-            for gy in range(max(gy_lo, 0), min(gy_hi + 1, g.ny)):
-                for gx in range(max(gx_lo, 0), min(gx_hi + 1, g.nx)):
-                    if (1, gy, gx) in pin_cells \
-                            or (1, gy, gx) in g._pin_approach_cells:
-                        continue
-                    g.blocked[1][gy][gx] = True
+    # through the pocket xy. L1 stays clear (the substrate floor is
+    # intact under flat-mounted devices). The pin cell itself remains
+    # exempt as a routing target; the approach corridor was already
+    # pruned of pocket-interior cells above, so a wire targeting the
+    # pin on L2 must arrive via a via from L1.
+    for name, pocket in pocket_by_device.items():
+        del name  # iteration target only; the pocket Rect is what we use
+        gx_lo, gy_lo = g.to_grid(pocket.x_min, pocket.y_min)
+        gx_hi, gy_hi = g.to_grid(pocket.x_max, pocket.y_max)
+        for gy in range(max(gy_lo, 0), min(gy_hi + 1, g.ny)):
+            for gx in range(max(gx_lo, 0), min(gx_hi + 1, g.nx)):
+                if (1, gy, gx) in pin_cells:
+                    continue
+                g.blocked[1][gy][gx] = True
+                hard_blocked.add((1, gy, gx))
 
+    g._hard_blocked = hard_blocked
     return g, pin_cells
