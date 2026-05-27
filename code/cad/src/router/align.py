@@ -26,16 +26,23 @@ wall-floor gap against another wire.
 
 from __future__ import annotations
 
+import math
 from dataclasses import dataclass
 from typing import Callable, TYPE_CHECKING
 
 if TYPE_CHECKING:
     from router.grid import Grid
+    from vitamins.substrate import SignalPath
 
 # Minimum length (in cells) for a run to be considered for alignment.
 # 6 cells = 3 mm — short runs don't visually benefit from pitch alignment
 # and chasing them risks collateral damage to nearby short bends.
 _ALIGN_MIN_RUN_CELLS = 6
+
+# Maximum L2 segment length (mm) for a (via, segment, via) triple to be
+# considered an "L-jog cluster" worth trying to collapse. Long L2 runs
+# are intentional foreign-layer hops; only short ones get re-evaluated.
+_VIA_CLUSTER_MAX_MM = 4.0
 
 
 @dataclass(frozen=True)
@@ -315,3 +322,123 @@ def align_pair_pitch(
                 continue
             rp2.raw_cells = new_cells
             applied = True
+
+
+def _seg_length_mm(seg) -> float:
+    dx = seg.end.x - seg.start.x
+    dy = seg.end.y - seg.start.y
+    return math.hypot(dx, dy)
+
+
+def _seg_path_layer_cells(
+    g: "Grid", x0: float, y0: float, x1: float, y1: float, layer: int,
+) -> list[tuple[int, int, int]]:
+    """Rasterise a straight-line cardinal segment to grid cells on `layer`.
+    Caller must guarantee the segment is axis-aligned.
+    """
+    gx0, gy0 = g.to_grid(x0, y0)
+    gx1, gy1 = g.to_grid(x1, y1)
+    cells: list[tuple[int, int, int]] = []
+    if gx0 == gx1:
+        step = 1 if gy1 > gy0 else -1
+        gy = gy0
+        while True:
+            cells.append((layer, gy, gx0))
+            if gy == gy1:
+                break
+            gy += step
+    elif gy0 == gy1:
+        step = 1 if gx1 > gx0 else -1
+        gx = gx0
+        while True:
+            cells.append((layer, gy0, gx))
+            if gx == gx1:
+                break
+            gx += step
+    return cells
+
+
+def merge_via_clusters(
+    paths: list["SignalPath"],
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    raw_paths,
+) -> list["SignalPath"]:
+    """Try to collapse `Via → short WireSegment → Via` triples to a single
+    same-layer crossing when the surrounding layer can bridge the gap.
+
+    Returns a new list of SignalPaths (paths with no qualifying cluster
+    are unchanged). The forbidden_check determines whether the bridge
+    cells on the surrounding layer are clear — same predicate the
+    collapse pass uses, so cluster removal never opens a wall-floor gap.
+    """
+    from vitamins.substrate import Point2D, SignalPath, Via, WireSegment
+
+    raw_by_name = {rp.name: rp for rp in raw_paths}
+    out: list[SignalPath] = []
+    for path in paths:
+        elements = list(path.elements)
+        rp = raw_by_name.get(path.name)
+        if rp is None:
+            out.append(path)
+            continue
+        forbidden_check = forbidden_check_factory(rp)
+        changed = False
+        i = 0
+        while i + 2 < len(elements):
+            v1, seg, v2 = elements[i], elements[i + 1], elements[i + 2]
+            if not (isinstance(v1, Via) and isinstance(seg, WireSegment) and isinstance(v2, Via)):
+                i += 1
+                continue
+            if _seg_length_mm(seg) > _VIA_CLUSTER_MAX_MM:
+                i += 1
+                continue
+            # Find the surrounding layer: the segments immediately before
+            # v1 and after v2 should be on the SAME layer (different from
+            # seg.layer). Locate them.
+            pre_layer = None
+            post_layer = None
+            for j in range(i - 1, -1, -1):
+                if isinstance(elements[j], WireSegment):
+                    pre_layer = elements[j].layer
+                    break
+            for j in range(i + 3, len(elements)):
+                if isinstance(elements[j], WireSegment):
+                    post_layer = elements[j].layer
+                    break
+            if pre_layer is None or post_layer is None or pre_layer != post_layer:
+                i += 1
+                continue
+            if pre_layer == seg.layer:
+                i += 1
+                continue
+            # Bridge candidate: same axis-aligned segment from v1.position
+            # to v2.position on `pre_layer`.
+            if v1.position.x != v2.position.x and v1.position.y != v2.position.y:
+                i += 1
+                continue
+            bridge_cells = _seg_path_layer_cells(
+                g,
+                v1.position.x, v1.position.y,
+                v2.position.x, v2.position.y,
+                pre_layer - 1,  # WireSegment.layer is 1/2; grid layer is 0/1
+            )
+            if not _cells_safe(bridge_cells, forbidden_check):
+                i += 1
+                continue
+            # Replace `v1, seg, v2` with a single bridging WireSegment on
+            # pre_layer. Adjacent segments need their endpoints updated.
+            bridge_seg = WireSegment(
+                start=Point2D(v1.position.x, v1.position.y),
+                end=Point2D(v2.position.x, v2.position.y),
+                layer=pre_layer,
+            )
+            elements[i:i + 3] = [bridge_seg]
+            changed = True
+            # Don't advance i — the new bridge might combine with
+            # neighbours (collapse handles that downstream if we re-emit).
+        if changed:
+            out.append(SignalPath(name=path.name, elements=tuple(elements)))
+        else:
+            out.append(path)
+    return out

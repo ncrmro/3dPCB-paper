@@ -473,6 +473,14 @@ def _finalise_collapse(
         # so over-blocking is small.
         _block_path(g, path, dims)
         out.append(path)
+
+    # Via-cluster collapse: detect `Via → short WireSegment → Via` triples
+    # that bracket a foreign-layer crossing and try to remove both vias
+    # when the surrounding layer can bridge the gap. Runs at the end so
+    # all paths' halos are stable; the bridge cells are checked against
+    # the same forbidden predicate the per-path collapse used.
+    from router.align import merge_via_clusters
+    out = merge_via_clusters(out, g, _forbidden_factory, raw_paths)
     return out
 
 
