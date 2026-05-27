@@ -44,6 +44,13 @@ _ALIGN_MIN_RUN_CELLS = 6
 # are intentional foreign-layer hops; only short ones get re-evaluated.
 _VIA_CLUSTER_MAX_MM = 4.0
 
+# Maximum length (mm) of the perpendicular stub between a long cardinal
+# run and a via for the stub to qualify for elimination by pulling the
+# via outward to align with the long run. 1.5 mm covers the typical
+# 0.5–1.0 mm pin-pitch-vs-grid-residual cases without absorbing
+# intentional short stubs that serve a real geometric purpose.
+_VIA_STUB_MAX_MM = 1.5
+
 
 @dataclass(frozen=True)
 class _Run:
@@ -539,4 +546,273 @@ def merge_via_clusters(
             out.append(SignalPath(name=path.name, elements=tuple(elements)))
         else:
             out.append(path)
+    return out
+
+
+def _seg_is_cardinal(seg) -> bool:
+    return seg.start.x == seg.end.x or seg.start.y == seg.end.y
+
+
+def _seg_is_horizontal(seg) -> bool:
+    return seg.start.y == seg.end.y and seg.start.x != seg.end.x
+
+
+def _find_branch_paths(
+    paths: list["SignalPath"],
+    raw_by_name: dict,
+    source_path_name: str,
+    via_xy: tuple[float, float],
+) -> list[int]:
+    """Indices of paths in the same bus+signal as `source_path_name`
+    whose first segment starts at `via_xy`. Those paths branched off
+    the source path at this via; if we move the via they need to
+    cascade-update or we'd disconnect their root.
+    """
+    from vitamins.substrate import WireSegment
+
+    src_rp = raw_by_name.get(source_path_name)
+    if src_rp is None:
+        return []
+    src_key = (src_rp.bus_name, src_rp.signal)
+    out_idx: list[int] = []
+    for j, p in enumerate(paths):
+        if p.name == source_path_name:
+            continue
+        rp = raw_by_name.get(p.name)
+        if rp is None:
+            continue
+        if (rp.bus_name, rp.signal) != src_key:
+            continue
+        if not p.elements:
+            continue
+        seg0 = p.elements[0]
+        if not isinstance(seg0, WireSegment):
+            continue
+        if (seg0.start.x, seg0.start.y) == via_xy:
+            out_idx.append(j)
+    return out_idx
+
+
+def pull_stub_vias(
+    paths: list["SignalPath"],
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    raw_paths,
+) -> list["SignalPath"]:
+    """Pull a via outward to align with its preceding long cardinal run
+    when a small perpendicular stub sits between them.
+
+    Pattern (per path, around each Via element):
+      ..., long cardinal segment on layer L (axis A),
+           short perpendicular stub on layer L (axis B = ⊥ A, length ≤ threshold),
+           Via,
+           foreign-layer segment on layer L' (axis B, collinear with the stub),
+           ...
+
+    The stub exists because A* parked the via one or two cells inward
+    of the wire's natural axis to satisfy the via-approach residual.
+    Pulling the via outward to where the long run ends drops the stub
+    entirely; the post-via foreign-layer segment grows by the stub
+    length to compensate.
+
+    Branch handling: if another path in the same net branches off the
+    via being shifted (its first segment starts at the via xy), the
+    branch's first segment is also shifted in the same direction so the
+    branch root tracks the via. We only attempt this when the branch's
+    first segment is cardinal and perpendicular to the via shift axis
+    (so the shift means "move the run's cross-axis position by Δ" — a
+    clean translation, not a reroute). If the branch geometry doesn't
+    permit a clean cascade, the whole via-shift is skipped.
+
+    Validation against the same forbidden predicate the collapse pass
+    used: no wall-floor gap can open from this transform.
+    """
+    from vitamins.substrate import Point2D, SignalPath, Via, WireSegment
+
+    raw_by_name = {rp.name: rp for rp in raw_paths}
+    out: list[SignalPath] = list(paths)
+    for i_path, path in enumerate(out):
+        elements = list(path.elements)
+        rp = raw_by_name.get(path.name)
+        if rp is None:
+            continue
+        forbidden_check = forbidden_check_factory(rp)
+        changed = False
+        i = 0
+        while i < len(elements):
+            elt = elements[i]
+            if not isinstance(elt, Via):
+                i += 1
+                continue
+            if i < 2 or i + 1 >= len(elements):
+                i += 1
+                continue
+            seg_long = elements[i - 2]
+            seg_stub = elements[i - 1]
+            seg_post = elements[i + 1]
+            if not all(isinstance(s, WireSegment) for s in (seg_long, seg_stub, seg_post)):
+                i += 1
+                continue
+            if not (_seg_is_cardinal(seg_long) and _seg_is_cardinal(seg_stub) and _seg_is_cardinal(seg_post)):
+                i += 1
+                continue
+            if seg_long.layer != seg_stub.layer:
+                i += 1
+                continue
+            if _seg_is_horizontal(seg_long) == _seg_is_horizontal(seg_stub):
+                i += 1
+                continue
+            if _seg_length_mm(seg_stub) > _VIA_STUB_MAX_MM:
+                i += 1
+                continue
+            if (seg_long.end.x, seg_long.end.y) != (seg_stub.start.x, seg_stub.start.y):
+                i += 1
+                continue
+            if (seg_stub.end.x, seg_stub.end.y) != (elt.position.x, elt.position.y):
+                i += 1
+                continue
+            if (seg_post.start.x, seg_post.start.y) != (elt.position.x, elt.position.y):
+                i += 1
+                continue
+            if _seg_is_horizontal(seg_post) != _seg_is_horizontal(seg_stub):
+                i += 1
+                continue
+            if seg_post.layer == seg_long.layer:
+                i += 1
+                continue
+
+            old_via_xy = (elt.position.x, elt.position.y)
+            new_via_pos = Point2D(seg_long.end.x, seg_long.end.y)
+            new_via_xy = (new_via_pos.x, new_via_pos.y)
+
+            # Identify branched paths that root at this via.
+            branch_idxs = _find_branch_paths(out, raw_by_name, path.name, old_via_xy)
+            # Compute branch updates upfront so we can bail atomically.
+            branch_updates: list[tuple[int, list]] = []
+            shift_is_horizontal_axis = seg_stub.start.y != seg_stub.end.y  # stub is vertical → shift in Y
+            ok_to_cascade = True
+            for j in branch_idxs:
+                br = out[j]
+                if not br.elements:
+                    ok_to_cascade = False
+                    break
+                br_seg0 = br.elements[0]
+                if not isinstance(br_seg0, WireSegment) or not _seg_is_cardinal(br_seg0):
+                    ok_to_cascade = False
+                    break
+                # Shift axis: if stub is vertical (gy changes), the via moved in Y.
+                # The branch's seg0 must be horizontal (perpendicular) so we can
+                # translate it cleanly in Y. (If branch seg0 is parallel to shift,
+                # we'd need to extend/trim — not handled here.)
+                br_seg0_horizontal = _seg_is_horizontal(br_seg0)
+                if shift_is_horizontal_axis:
+                    # Shift is in Y → branch seg0 should be horizontal (along X).
+                    if not br_seg0_horizontal:
+                        ok_to_cascade = False
+                        break
+                    new_br_seg0 = WireSegment(
+                        start=Point2D(br_seg0.start.x, new_via_pos.y),
+                        end=Point2D(br_seg0.end.x, new_via_pos.y),
+                        layer=br_seg0.layer,
+                    )
+                else:
+                    if br_seg0_horizontal:
+                        ok_to_cascade = False
+                        break
+                    new_br_seg0 = WireSegment(
+                        start=Point2D(new_via_pos.x, br_seg0.start.y),
+                        end=Point2D(new_via_pos.x, br_seg0.end.y),
+                        layer=br_seg0.layer,
+                    )
+                # If branch has a second segment, it must be cardinal and
+                # perpendicular to seg0 (so we can extend its start endpoint).
+                new_br_seg1 = None
+                if len(br.elements) > 1:
+                    br_seg1 = br.elements[1]
+                    if isinstance(br_seg1, WireSegment) and _seg_is_cardinal(br_seg1):
+                        # seg1 starts where seg0 ends. After shift, seg0 ends
+                        # at the new location; seg1 needs its start moved too.
+                        if (br_seg1.start.x, br_seg1.start.y) != (br_seg0.end.x, br_seg0.end.y):
+                            ok_to_cascade = False
+                            break
+                        if _seg_is_horizontal(br_seg1) == _seg_is_horizontal(br_seg0):
+                            ok_to_cascade = False
+                            break
+                        new_br_seg1 = WireSegment(
+                            start=Point2D(new_br_seg0.end.x, new_br_seg0.end.y),
+                            end=br_seg1.end,
+                            layer=br_seg1.layer,
+                        )
+                    elif isinstance(br_seg1, WireSegment):
+                        # Non-cardinal seg1 (chamfer) — bail.
+                        ok_to_cascade = False
+                        break
+                # Validate branch cells. Build a same-net allow-list so
+                # cells in the source path's own raw/halo (which the
+                # standard forbidden_check would treat as "other" relative
+                # to the branch) don't spuriously block the cascade —
+                # they're same-net wires, not foreign ones.
+                same_net_allow = set(rp.raw_cells) | set(rp.halo_cells) | set(rp.own_pin_cells)
+                check_cells = _seg_path_layer_cells(
+                    g,
+                    new_br_seg0.start.x, new_br_seg0.start.y,
+                    new_br_seg0.end.x, new_br_seg0.end.y,
+                    new_br_seg0.layer - 1,
+                )
+                br_rp = raw_by_name.get(br.name)
+                if br_rp is None:
+                    ok_to_cascade = False
+                    break
+                br_forbidden = forbidden_check_factory(br_rp)
+                blocked = [c for c in check_cells if br_forbidden(*c) and c not in same_net_allow]
+                if blocked:
+                    ok_to_cascade = False
+                    break
+                if new_br_seg1 is not None:
+                    check_cells1 = _seg_path_layer_cells(
+                        g,
+                        new_br_seg1.start.x, new_br_seg1.start.y,
+                        new_br_seg1.end.x, new_br_seg1.end.y,
+                        new_br_seg1.layer - 1,
+                    )
+                    blocked1 = [c for c in check_cells1 if br_forbidden(*c) and c not in same_net_allow]
+                    if blocked1:
+                        ok_to_cascade = False
+                        break
+                # Stage update.
+                new_br_elements = list(br.elements)
+                new_br_elements[0] = new_br_seg0
+                if new_br_seg1 is not None:
+                    new_br_elements[1] = new_br_seg1
+                branch_updates.append((j, new_br_elements))
+            if not ok_to_cascade:
+                i += 1
+                continue
+
+            # Validate the source path's extended foreign-layer segment.
+            bridge_cells = _seg_path_layer_cells(
+                g,
+                new_via_pos.x, new_via_pos.y,
+                seg_post.end.x, seg_post.end.y,
+                seg_post.layer - 1,
+            )
+            if not _cells_safe(bridge_cells, forbidden_check):
+                i += 1
+                continue
+
+            new_via = Via(position=new_via_pos, diameter=elt.diameter)
+            new_seg_post = WireSegment(
+                start=new_via_pos,
+                end=seg_post.end,
+                layer=seg_post.layer,
+            )
+            elements[i - 1:i + 2] = [new_via, new_seg_post]
+            changed = True
+            # Apply branch updates.
+            for j, new_br_elements in branch_updates:
+                br = out[j]
+                out[j] = SignalPath(name=br.name, elements=tuple(new_br_elements))
+            i = max(0, i - 1)
+        if changed:
+            out[i_path] = SignalPath(name=path.name, elements=tuple(elements))
     return out

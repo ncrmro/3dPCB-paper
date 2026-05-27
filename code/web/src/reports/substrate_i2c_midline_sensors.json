@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_sensors",
   "spec_path": "specs/i2c_midline_sensors.yaml",
   "score": {
-    "total_length_mm": 329.991,
+    "total_length_mm": 330.991,
     "l1_length_mm": 276.663,
-    "l2_length_mm": 53.328,
+    "l2_length_mm": 54.328,
     "via_count": 8,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 258.324
+    "aggregate": 259.824
   },
   "invariants": [
     {
@@ -241,7 +241,7 @@
       "ref": "primary_SDA_scd41",
       "role": "via",
       "x": 1.0,
-      "y": -16.0,
+      "y": -17.0,
       "diameter": 1.5
     },
     {

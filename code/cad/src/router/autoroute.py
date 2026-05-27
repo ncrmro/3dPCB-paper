@@ -479,8 +479,13 @@ def _finalise_collapse(
     # when the surrounding layer can bridge the gap. Runs at the end so
     # all paths' halos are stable; the bridge cells are checked against
     # the same forbidden predicate the per-path collapse used.
-    from router.align import merge_via_clusters
+    from router.align import merge_via_clusters, pull_stub_vias
     out = merge_via_clusters(out, g, _forbidden_factory, raw_paths)
+    # Stub elimination: pull each via outward (along its long-run axis)
+    # when a small perpendicular stub sits between the long cardinal
+    # approach and the via. Same forbidden predicate as above; the post-
+    # via foreign-layer segment is extended to absorb the stub length.
+    out = pull_stub_vias(out, g, _forbidden_factory, raw_paths)
     return out
 
 
