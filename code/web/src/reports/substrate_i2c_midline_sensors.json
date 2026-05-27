@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_sensors",
   "spec_path": "specs/i2c_midline_sensors.yaml",
   "score": {
-    "total_length_mm": 348.5,
-    "l1_length_mm": 292.5,
-    "l2_length_mm": 56.0,
+    "total_length_mm": 336.0,
+    "l1_length_mm": 279.5,
+    "l2_length_mm": 56.5,
     "via_count": 6,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 260.25
+    "aggregate": 254.5
   },
   "invariants": [
     {
@@ -28,7 +28,7 @@
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
       "passed": false,
-      "message": "min cross-net centreline: 1.00 mm (floor 1.40; worst pair primary_SCL \u2194 primary_SDA; 23 sample pairs below the floor)"
+      "message": "min cross-net centreline: 1.00 mm (floor 1.40; worst pair primary_SCL \u2194 primary_SDA; 27 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
@@ -206,17 +206,9 @@
     },
     {
       "source": "via",
-      "ref": "primary_GND_oled",
-      "role": "via",
-      "x": 0.0,
-      "y": 8.0,
-      "diameter": 1.5
-    },
-    {
-      "source": "via",
       "ref": "primary_GND_scd41",
       "role": "via",
-      "x": 0.0,
+      "x": -3.0,
       "y": 3.5,
       "diameter": 1.5
     },
@@ -226,6 +218,14 @@
       "role": "via",
       "x": 13.0,
       "y": 3.5,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_SDA_oled",
+      "role": "via",
+      "x": -4.5,
+      "y": 0.5,
       "diameter": 1.5
     },
     {
@@ -248,8 +248,8 @@
       "source": "via",
       "ref": "primary_VCC_scd41",
       "role": "via",
-      "x": 1.5,
-      "y": 0.0,
+      "x": 4.5,
+      "y": 2.0,
       "diameter": 1.5
     }
   ]

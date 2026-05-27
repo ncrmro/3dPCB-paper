@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_sensors_flipped",
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
-    "total_length_mm": 358.5,
-    "l1_length_mm": 305.5,
-    "l2_length_mm": 53.0,
-    "via_count": 8,
+    "total_length_mm": 343.5,
+    "l1_length_mm": 314.0,
+    "l2_length_mm": 29.5,
+    "via_count": 5,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 272.25
+    "aggregate": 226.25
   },
   "invariants": [
     {
@@ -34,7 +34,7 @@
       "key": "drilled_holes_match_vias",
       "label": "Every via has a drilled hole; no orphans",
       "passed": true,
-      "message": "24 holes \u2014 every via lands on a drilled position"
+      "message": "21 holes \u2014 every via lands on a drilled position"
     },
     {
       "key": "endpoints_connected",
@@ -206,33 +206,9 @@
     },
     {
       "source": "via",
-      "ref": "primary_GND_bh1750",
-      "role": "via",
-      "x": 13.0,
-      "y": 4.5,
-      "diameter": 1.5
-    },
-    {
-      "source": "via",
-      "ref": "primary_GND_scd41",
+      "ref": "primary_SDA_oled",
       "role": "via",
       "x": 0.0,
-      "y": 9.0,
-      "diameter": 1.5
-    },
-    {
-      "source": "via",
-      "ref": "primary_SDA_oled",
-      "role": "via",
-      "x": 16.5,
-      "y": -1.5,
-      "diameter": 1.5
-    },
-    {
-      "source": "via",
-      "ref": "primary_SDA_oled",
-      "role": "via",
-      "x": 16.5,
       "y": 5.0,
       "diameter": 1.5
     },
@@ -265,7 +241,7 @@
       "ref": "primary_VCC_scd41",
       "role": "via",
       "x": 1.5,
-      "y": 5.5,
+      "y": 6.5,
       "diameter": 1.5
     }
   ]

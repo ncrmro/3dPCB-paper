@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_starter",
   "spec_path": "specs/i2c_starter.yaml",
   "score": {
-    "total_length_mm": 394.0,
-    "l1_length_mm": 279.5,
-    "l2_length_mm": 114.5,
-    "via_count": 5,
-    "edge_clearance_min_mm": 1.0,
+    "total_length_mm": 345.5,
+    "l1_length_mm": 261.5,
+    "l2_length_mm": 84.0,
+    "via_count": 8,
+    "edge_clearance_min_mm": 3.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 336.5
+    "aggregate": 296.75
   },
   "invariants": [
     {
@@ -22,19 +22,19 @@
       "key": "edge_clearance",
       "label": "Channels \u2265 edge_clearance from board outline",
       "passed": true,
-      "message": "min centreline \u2192 edge: 2.00 mm (threshold 0.40; in primary_GND_oled)"
+      "message": "min centreline \u2192 edge: 4.00 mm (threshold 0.40; in primary_VCC_scd41)"
     },
     {
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
       "passed": false,
-      "message": "min cross-net centreline: 0.71 mm (floor 1.40; worst pair primary_GND \u2194 primary_SDA; 50 sample pairs below the floor)"
+      "message": "min cross-net centreline: 1.12 mm (floor 1.40; worst pair primary_SCL \u2194 primary_GND; 6 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
       "label": "Every via has a drilled hole; no orphans",
       "passed": true,
-      "message": "21 holes \u2014 every via lands on a drilled position"
+      "message": "24 holes \u2014 every via lands on a drilled position"
     },
     {
       "key": "endpoints_connected",
@@ -206,25 +206,17 @@
     },
     {
       "source": "via",
-      "ref": "primary_GND_bh1750",
+      "ref": "primary_GND_oled",
       "role": "via",
-      "x": 5.0,
-      "y": -19.0,
-      "diameter": 1.5
-    },
-    {
-      "source": "via",
-      "ref": "primary_GND_bh1750",
-      "role": "via",
-      "x": 27.5,
-      "y": -19.5,
+      "x": -4.0,
+      "y": -16.0,
       "diameter": 1.5
     },
     {
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": 0.0,
+      "x": -5.5,
       "y": -17.0,
       "diameter": 1.5
     },
@@ -232,16 +224,48 @@
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": 12.5,
-      "y": -20.5,
+      "x": 0.0,
+      "y": -11.0,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_SDA_scd41",
+      "role": "via",
+      "x": 0.0,
+      "y": 5.5,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_SDA_scd41",
+      "role": "via",
+      "x": 3.0,
+      "y": 5.5,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_SDA_scd41",
+      "role": "via",
+      "x": 16.5,
+      "y": -12.0,
+      "diameter": 1.5
+    },
+    {
+      "source": "via",
+      "ref": "primary_SDA_scd41",
+      "role": "via",
+      "x": 16.5,
+      "y": -15.0,
       "diameter": 1.5
     },
     {
       "source": "via",
       "ref": "primary_VCC_scd41",
       "role": "via",
-      "x": -11.0,
-      "y": -13.0,
+      "x": 0.0,
+      "y": -12.5,
       "diameter": 1.5
     }
   ]

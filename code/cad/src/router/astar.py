@@ -20,6 +20,13 @@ _W_CROSSING    = 10.0
 _W_EDGE        = 3.0
 _EDGE_RADIUS_MM = 1.0   # within this distance of the board edge → edge penalty
 
+# Tiebreaker: any direction change costs _W_BEND. Small enough that it
+# never overrides a real obstacle (`_W_STEP=1.0` dwarfs it) but it
+# breaks the staircase/L-shape tie in favour of the L-shape. Without
+# it A* picks whichever zigzag the heap orders first, which surfaces
+# as "stepped squares" in the final waypoint emit.
+_W_BEND = 0.05
+
 _W_PARALLEL_BONUS = 0.4   # step-cost discount when a candidate cell sits
                           # next to a cell in `parallel_target_cells` —
                           # rewards pair-mate signals running parallel.
@@ -114,22 +121,26 @@ def _astar(
                     near_parallel.add(cell)
         near_parallel -= target_set
 
-    # Priority queue of (f, g, cell, parent)
-    open_heap: list[tuple[float, float, tuple[int, int, int], int]] = []
-    # cell → (g_cost, parent_index). parents stored in a list so we can
-    # reconstruct the path.
-    came_from: list[tuple[int, int, int] | None] = [None]  # index 0 = root sentinel
+    # Priority queue of (f, g, cell, parent_dir).
+    # `parent_dir` is the (dl, dy, dx) of the move that led to `cell`,
+    # or None for seed cells. It feeds the bend-penalty tiebreaker
+    # below — a step in a *different* direction than `parent_dir`
+    # costs an extra `_W_BEND`, which keeps the heap from emitting
+    # zigzag staircases when an L-shape has the same Manhattan cost.
+    open_heap: list[
+        tuple[float, float, tuple[int, int, int], tuple[int, int, int] | None]
+    ] = []
     g_cost: dict[tuple[int, int, int], float] = {}
 
     for s in starts:
         g_cost[s] = 0.0
         h = min(_heuristic(s, goal) for goal in goals)
-        heapq.heappush(open_heap, (h, 0.0, s, 0))
+        heapq.heappush(open_heap, (h, 0.0, s, None))
 
     parents: dict[tuple[int, int, int], tuple[int, int, int] | None] = dict.fromkeys(starts)
 
     while open_heap:
-        f, gc, cur, _ = heapq.heappop(open_heap)
+        f, gc, cur, prev_dir = heapq.heappop(open_heap)
         if cur in goals:
             # reconstruct
             path = [cur]
@@ -164,12 +175,15 @@ def _astar(
             )
             if near_parallel and nbr in near_parallel:
                 step_cost = max(step_cost - _W_PARALLEL_BONUS, 0.05)
+            step_dir = (0, dy, dx)
+            if prev_dir is not None and prev_dir != step_dir:
+                step_cost += _W_BEND
             new_g = gc + step_cost
             if new_g < g_cost.get(nbr, math.inf):
                 g_cost[nbr] = new_g
                 parents[nbr] = cur
                 h = min(_heuristic(nbr, goal) for goal in goals)
-                heapq.heappush(open_heap, (new_g + h, new_g, nbr, 0))
+                heapq.heappush(open_heap, (new_g + h, new_g, nbr, step_dir))
 
         # Layer change (via)
         other = 1 - cur_layer
@@ -177,11 +191,15 @@ def _astar(
         if (not g.blocked[other][cur_gy][cur_gx] or nbr in own_pin_cells) \
                 and (nbr not in pin_cells or nbr in own_pin_cells) \
                 and (nbr not in extra_blocked or nbr in own_pin_cells):
-            new_g = gc + _W_VIA
+            step_cost = _W_VIA
+            step_dir = (other - cur_layer, 0, 0)
+            if prev_dir is not None and prev_dir != step_dir:
+                step_cost += _W_BEND
+            new_g = gc + step_cost
             if new_g < g_cost.get(nbr, math.inf):
                 g_cost[nbr] = new_g
                 parents[nbr] = cur
                 h = min(_heuristic(nbr, goal) for goal in goals)
-                heapq.heappush(open_heap, (new_g + h, new_g, nbr, 0))
+                heapq.heappush(open_heap, (new_g + h, new_g, nbr, step_dir))
 
     return None
