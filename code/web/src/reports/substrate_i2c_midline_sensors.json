@@ -31,6 +31,12 @@
       "message": "min cross-net centreline: 1.41 mm (floor 1.40; worst pair primary_GND \u2194 primary_SDA; 0 sample pairs below the floor)"
     },
     {
+      "key": "wall_floor_cross_layer",
+      "label": "Cross-net wires on opposite layers don't project-overlap (advisory)",
+      "passed": false,
+      "message": "min cross-layer centreline: 0.00 mm (floor 0.40; worst pair primary_SCL_scd41 \u2194 primary_SDA_scd41; 102 sample pairs below the floor)"
+    },
+    {
       "key": "drilled_holes_match_vias",
       "label": "Every via has a drilled hole; no orphans",
       "passed": true,

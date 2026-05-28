@@ -166,6 +166,56 @@ def _inv_wall_floor(board: Board, paths, dims) -> tuple[bool, str]:
     )
 
 
+def _inv_cross_layer_overlap(board: Board, paths, dims) -> tuple[bool, str]:
+    """Min centreline-to-centreline distance between different-net wires
+    on OPPOSITE layers. Channels on L1/L2 are separated by the substrate
+    thickness (~3 mm) so they can't short, but projected overlap weakens
+    the substrate locally and tends to look messy in the 3D model.
+    `channel_width / 2` is the floor — below it the two channels overlap
+    in projection (one's wire edge passes under the other's centre).
+    """
+    import math
+    cross_floor = dims.channel_width / 2
+
+    def _net_id(name): return name.rsplit("_", 1)[0]
+
+    samples = []
+    for p in paths:
+        nid = _net_id(p.name)
+        for e in p.elements:
+            if not isinstance(e, WireSegment):
+                continue
+            dx, dy = e.end.x - e.start.x, e.end.y - e.start.y
+            length = math.hypot(dx, dy)
+            steps = max(int(length / 0.25), 1)
+            for i in range(steps + 1):
+                t = i / steps
+                samples.append((nid, e.layer, p.name,
+                                e.start.x + t * dx, e.start.y + t * dy))
+
+    worst = (math.inf, "", "")
+    below_count = 0
+    for i, (n1, l1, p1, x1, y1) in enumerate(samples):
+        for j in range(i + 1, len(samples)):
+            n2, l2, p2, x2, y2 = samples[j]
+            if l1 == l2 or n1 == n2:
+                continue
+            d = math.hypot(x1 - x2, y1 - y2)
+            if d < cross_floor:
+                below_count += 1
+            if d < worst[0]:
+                worst = (d, p1, p2)
+
+    if worst[0] == math.inf:
+        return True, "no cross-layer pairs to check"
+    passed = worst[0] >= cross_floor
+    return passed, (
+        f"min cross-layer centreline: {worst[0]:.2f} mm "
+        f"(floor {cross_floor:.2f}; worst pair {worst[1]} ↔ {worst[2]}; "
+        f"{below_count} sample pairs below the floor)"
+    )
+
+
 def _inv_endpoints_connected(board: Board, paths) -> tuple[bool, str]:
     nets = board.nets()
     expected = {n.signal: {s.instance_name for s in n.slaves} for n in nets}
@@ -194,6 +244,9 @@ def _run_invariants(board: Board, paths, dims) -> list[dict]:
          lambda: _inv_edge_clearance(board, paths, dims)),
         ("wall_floor", "Cross-net wires ≥ channel_width + min_wall_thickness apart",
          lambda: _inv_wall_floor(board, paths, dims)),
+        ("wall_floor_cross_layer",
+         "Cross-net wires on opposite layers don't project-overlap (advisory)",
+         lambda: _inv_cross_layer_overlap(board, paths, dims)),
         ("drilled_holes_match_vias", "Every via has a drilled hole; no orphans",
          lambda: _inv_drilled_holes_match_vias(board, paths)),
         ("endpoints_connected", "Every bus slave reached from the master",

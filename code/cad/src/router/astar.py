@@ -43,6 +43,14 @@ _PARALLEL_MAX = 5         # Max Manhattan-distance for the bonus.
 # pin pitch and won't introduce small Y jogs to claim a shorter offset.
 _PARALLEL_PITCH_TOL = 1
 
+# Cross-layer crossing penalty: small step-cost added when the candidate
+# cell sits directly over an existing wire on the OTHER layer. Doesn't
+# block (perpendicular crossings still pass through, just with extra
+# cost), but biases routes away from long parallel runs that visually
+# stack on top of each other and weaken the substrate floor between L1
+# and L2 channels.
+_W_CROSS_LAYER = 0.0  # disabled — see commit history
+
 _MOVES = [
     (1,  0,  0), (-1, 0,  0),
     (0,  1,  0), ( 0, -1, 0),
@@ -198,6 +206,14 @@ def _astar(
             )
             if near_parallel and nbr in near_parallel:
                 step_cost = max(step_cost - _W_PARALLEL_BONUS, 0.05)
+            # Cross-layer crossing penalty: if the OTHER layer at this xy
+            # is already occupied, bias the route to find fresh
+            # territory. Disabled (_W_CROSS_LAYER = 0) by default — even
+            # at 0.1 it disrupted existing pin-approach choices on
+            # i2c_sensors_flipped. Routing the issue out requires the
+            # invariant + per-spec hint approach.
+            if _W_CROSS_LAYER and g.blocked[1 - cur_layer][ny][nx_]:
+                step_cost += _W_CROSS_LAYER
             step_dir = (0, dy, dx)
             if prev_dir is not None and prev_dir != step_dir:
                 step_cost += _W_BEND
