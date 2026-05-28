@@ -1232,3 +1232,212 @@ def pull_stub_vias(
         if changed:
             out[i_path] = SignalPath(name=path.name, elements=tuple(elements))
     return out
+
+
+def slide_via_pair_clusters(
+    paths: list["SignalPath"],
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    raw_paths,
+) -> list["SignalPath"]:
+    """Slide a `Via→cross-layer hop→Via` cluster outward along the long
+    cardinal trunk that precedes it, absorbing the short jog that
+    immediately follows the cluster on the original layer.
+
+    Pattern (around two consecutive vias):
+      seg_long  (layer L1, axis A, long enough that absorbing the jog
+                 still leaves it long),
+      Via1,
+      seg_cross (layer L2, axis ⊥ A, short — the cross-layer hop that
+                 sidesteps an obstacle on L1),
+      Via2,
+      seg_jog   (layer L1, axis A, length ≤ slide threshold),
+      seg_after (layer L1, axis ⊥ A — the continuation that climbs
+                 perpendicular to the trunk).
+
+    The cluster sits in the *middle* of the trunk because A* found the
+    cheapest cross point there. Visually this leaves a short L1 jog at
+    a different cross-axis position than the main trunk — the user sees
+    it as a zigzag right next to the trunk it should be aligned with.
+
+    Transform (atomic per cluster):
+      - Extend seg_long east (or whichever direction) by len(seg_jog),
+      - Move Via1 to the new end of seg_long,
+      - Move seg_cross to the new x (or y) of Via1,
+      - Move Via2 to the new x (or y), same cross-axis as before,
+      - Drop seg_jog entirely (its endpoint becomes the new Via2 pos).
+
+    Validation uses the same forbidden_check the collapse pass used, so
+    the slide can never open a wall-floor gap.
+    """
+    from vitamins.substrate import Point2D, SignalPath, Via, WireSegment
+
+    raw_by_name = {rp.name: rp for rp in raw_paths}
+    # Index same-net paths so we can extend a trunk over a sibling
+    # branch's cells without tripping the wall-floor check (daisy-chain
+    # trunks are shared between the parent and the branch, but the A*
+    # `raw_cells` capture only the cells each path *added*, so we need
+    # to rasterise the SignalPath segments to know what's truly same-net).
+    paths_by_signal: dict[tuple[str, str], list[int]] = {}
+    for j, p in enumerate(paths):
+        rp_j = raw_by_name.get(p.name)
+        if rp_j is None:
+            continue
+        paths_by_signal.setdefault((rp_j.bus_name, rp_j.signal), []).append(j)
+
+    out: list[SignalPath] = list(paths)
+    for i_path, path in enumerate(out):
+        elements = list(path.elements)
+        rp = raw_by_name.get(path.name)
+        if rp is None:
+            continue
+        forbidden_check = forbidden_check_factory(rp)
+        # Same-net allow-list: cells covered by any segment of any path
+        # in the same bus+signal. Includes this path's own cells plus
+        # every sibling branch's cells, rasterised from their
+        # SignalPath segments (raw_cells alone misses daisy-chain
+        # trunk segments shared between parent and branch).
+        same_net_allow: set[tuple[int, int, int]] = set(rp.raw_cells)
+        src_key = (rp.bus_name, rp.signal)
+        for j_sib in paths_by_signal.get(src_key, ()):
+            sib_path = out[j_sib]
+            for sib_elt in sib_path.elements:
+                if isinstance(sib_elt, WireSegment) and _seg_is_cardinal(sib_elt):
+                    same_net_allow.update(_seg_path_layer_cells(
+                        g,
+                        sib_elt.start.x, sib_elt.start.y,
+                        sib_elt.end.x, sib_elt.end.y,
+                        sib_elt.layer - 1,
+                    ))
+        changed = False
+        i = 0
+        while i + 4 < len(elements):
+            # Need: seg_long [i], Via1 [i+1], seg_cross [i+2],
+            # Via2 [i+3], seg_jog [i+4], seg_after [i+5]
+            if i + 5 >= len(elements):
+                break
+            seg_long = elements[i]
+            v1 = elements[i + 1]
+            seg_cross = elements[i + 2]
+            v2 = elements[i + 3]
+            seg_jog = elements[i + 4]
+            seg_after = elements[i + 5]
+            if not (isinstance(seg_long, WireSegment)
+                    and isinstance(v1, Via)
+                    and isinstance(seg_cross, WireSegment)
+                    and isinstance(v2, Via)
+                    and isinstance(seg_jog, WireSegment)
+                    and isinstance(seg_after, WireSegment)):
+                i += 1
+                continue
+            if not (_seg_is_cardinal(seg_long)
+                    and _seg_is_cardinal(seg_cross)
+                    and _seg_is_cardinal(seg_jog)
+                    and _seg_is_cardinal(seg_after)):
+                i += 1
+                continue
+            # seg_long and seg_jog must be on the same layer and SAME axis.
+            if seg_long.layer != seg_jog.layer:
+                i += 1
+                continue
+            if _seg_is_horizontal(seg_long) != _seg_is_horizontal(seg_jog):
+                i += 1
+                continue
+            # seg_cross on the other layer, axis perpendicular to seg_long.
+            if seg_cross.layer == seg_long.layer:
+                i += 1
+                continue
+            if _seg_is_horizontal(seg_cross) == _seg_is_horizontal(seg_long):
+                i += 1
+                continue
+            # seg_after on same layer as seg_long, axis perpendicular.
+            if seg_after.layer != seg_long.layer:
+                i += 1
+                continue
+            if _seg_is_horizontal(seg_after) == _seg_is_horizontal(seg_long):
+                i += 1
+                continue
+            # Jog must be short — sliding a long jog could push the via
+            # past the trunk's natural end (into someone else's halo).
+            if _seg_length_mm(seg_jog) > _VIA_CLUSTER_MAX_MM:
+                i += 1
+                continue
+            # Endpoint chain must be tight: seg_long → v1 → seg_cross →
+            # v2 → seg_jog → seg_after, with no gaps.
+            if (seg_long.end.x, seg_long.end.y) != (v1.position.x, v1.position.y):
+                i += 1
+                continue
+            if (seg_cross.start.x, seg_cross.start.y) != (v1.position.x, v1.position.y):
+                i += 1
+                continue
+            if (seg_cross.end.x, seg_cross.end.y) != (v2.position.x, v2.position.y):
+                i += 1
+                continue
+            if (seg_jog.start.x, seg_jog.start.y) != (v2.position.x, v2.position.y):
+                i += 1
+                continue
+            if (seg_after.start.x, seg_after.start.y) != (seg_jog.end.x, seg_jog.end.y):
+                i += 1
+                continue
+            # Slide direction: from seg_long.end (= v1) toward seg_jog.end.
+            # On the trunk axis, the new long extension covers
+            # [seg_long.end, seg_jog.end].
+            horizontal = _seg_is_horizontal(seg_long)
+            # New via positions: at (seg_jog.end.x, seg_long.end.y) for v1
+            # and (seg_jog.end.x, v2.position.y) for v2 — keep the cross
+            # hop's length and direction the same.
+            if horizontal:
+                new_v1_pos = Point2D(seg_jog.end.x, seg_long.end.y)
+                new_v2_pos = Point2D(seg_jog.end.x, v2.position.y)
+            else:
+                new_v1_pos = Point2D(seg_long.end.x, seg_jog.end.y)
+                new_v2_pos = Point2D(v2.position.x, seg_jog.end.y)
+            new_seg_long = WireSegment(
+                start=seg_long.start,
+                end=new_v1_pos,
+                layer=seg_long.layer,
+            )
+            new_seg_cross = WireSegment(
+                start=new_v1_pos,
+                end=new_v2_pos,
+                layer=seg_cross.layer,
+            )
+            # Validate: the EXTENSION portion of the long trunk and the
+            # new cross hop must be safe. The extension covers cells
+            # the seg_jog used to occupy on the OTHER row, plus the row
+            # where the trunk continues at seg_long.end.y. We only
+            # need to re-check the cells that *changed* layer/position.
+            extension_cells = _seg_path_layer_cells(
+                g,
+                v1.position.x, v1.position.y,
+                new_v1_pos.x, new_v1_pos.y,
+                seg_long.layer - 1,
+            )
+            cross_cells = _seg_path_layer_cells(
+                g,
+                new_v1_pos.x, new_v1_pos.y,
+                new_v2_pos.x, new_v2_pos.y,
+                seg_cross.layer - 1,
+            )
+            blocked = [
+                c for c in extension_cells + cross_cells
+                if forbidden_check(*c) and c not in same_net_allow
+            ]
+            if blocked:
+                i += 1
+                continue
+            # Apply: replace [seg_long, v1, seg_cross, v2, seg_jog] with
+            # [new_seg_long, new_v1, new_seg_cross, new_v2]. seg_after
+            # is unchanged (its start is still (seg_jog.end.x, seg_jog.end.y)
+            # which now coincides with new_v2_pos).
+            new_v1 = Via(position=new_v1_pos, diameter=v1.diameter)
+            new_v2 = Via(position=new_v2_pos, diameter=v2.diameter)
+            elements[i:i + 5] = [new_seg_long, new_v1, new_seg_cross, new_v2]
+            changed = True
+            # Restart scanning from before the modified region — a
+            # cascade of clusters along the same trunk can happen
+            # sequentially.
+            i = max(0, i - 1)
+        if changed:
+            out[i_path] = SignalPath(name=path.name, elements=tuple(elements))
+    return out

@@ -490,13 +490,21 @@ def _finalise_collapse(
     # when the surrounding layer can bridge the gap. Runs at the end so
     # all paths' halos are stable; the bridge cells are checked against
     # the same forbidden predicate the per-path collapse used.
-    from router.align import merge_via_clusters, pull_stub_vias
+    from router.align import (
+        merge_via_clusters, pull_stub_vias, slide_via_pair_clusters,
+    )
     out = merge_via_clusters(out, g, _forbidden_factory, raw_paths)
     # Stub elimination: pull each via outward (along its long-run axis)
     # when a small perpendicular stub sits between the long cardinal
     # approach and the via. Same forbidden predicate as above; the post-
     # via foreign-layer segment is extended to absorb the stub length.
     out = pull_stub_vias(out, g, _forbidden_factory, raw_paths)
+    # Cluster slide: when a `Via→cross-hop→Via` cluster sits in the
+    # middle of a long L1 trunk (because A* found the cheapest crossing
+    # there), slide it outward so the post-via jog is absorbed into the
+    # main trunk. Removes the SDA-style "trunk-then-tiny-jog" zigzag
+    # that sits 5 cells off the main trunk row.
+    out = slide_via_pair_clusters(out, g, _forbidden_factory, raw_paths)
     return out
 
 
