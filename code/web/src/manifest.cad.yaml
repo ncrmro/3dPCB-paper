@@ -27,6 +27,9 @@ models:
 - name: receptacle_test_coupon
   glb: /models/cad/receptacle_test_coupon.glb
   camera: top
+- name: substrate_i2c_midline_no_oled
+  glb: /models/cad/substrate_i2c_midline_no_oled.glb
+  camera: top
 - name: substrate_i2c_midline_sensors
   glb: /models/cad/substrate_i2c_midline_sensors.glb
   camera: top

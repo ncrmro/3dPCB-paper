@@ -1,0 +1,20 @@
+name: i2c_midline_no_oled
+
+# Variant of `i2c_midline_sensors` without the OLED. Keeps the SCD41
+# + BH1750 south-of-midline pair so the routing reveals the master →
+# sensor trunks cleanly without the OLED's north-bound branches
+# obscuring the back-corner pitch issues.
+
+levels:
+  - name: base
+    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    z_start: -1.5
+    z_end: 1.5
+
+devices:
+  - { name: u1, device: esp32_c3_supermini, position: { x: -21, y: -7 } }
+  - { name: scd41,  device: scd41,  position: { x:  9, y: -9.6 }, rotation: 180 }
+  - { name: bh1750, device: bh1750, position: { x: 25, y: -8 },   rotation: 180 }
+
+buses:
+  - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750] }

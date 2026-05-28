@@ -1,15 +1,15 @@
 {
-  "name": "i2c_sensors_flipped",
-  "class": "Substrate_i2c_sensors_flipped",
-  "spec_path": "specs/i2c_sensors_flipped.yaml",
+  "name": "i2c_midline_no_oled",
+  "class": "Substrate_i2c_midline_no_oled",
+  "spec_path": "specs/i2c_midline_no_oled.yaml",
   "score": {
-    "total_length_mm": 352.299,
-    "l1_length_mm": 312.263,
-    "l2_length_mm": 40.036,
+    "total_length_mm": 289.391,
+    "l1_length_mm": 269.891,
+    "l2_length_mm": 19.5,
     "via_count": 5,
     "edge_clearance_min_mm": 0.1,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 241.185
+    "aggregate": 189.195
   },
   "invariants": [
     {
@@ -27,20 +27,20 @@
     {
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
-      "passed": false,
-      "message": "min cross-net centreline: 1.50 mm (floor 1.80; worst pair primary_SCL \u2194 primary_SDA; 16 sample pairs below the floor)"
+      "passed": true,
+      "message": "min cross-net centreline: 2.00 mm (floor 1.80; worst pair primary_SCL \u2194 primary_SDA; 0 sample pairs below the floor)"
     },
     {
       "key": "wall_floor_cross_layer",
       "label": "Cross-net wires on opposite layers don't project-overlap (advisory)",
       "passed": false,
-      "message": "min cross-layer centreline: 0.00 mm (floor 0.40; worst pair primary_SCL_scd41 \u2194 primary_SDA_scd41; 80 sample pairs below the floor)"
+      "message": "min cross-layer centreline: 0.00 mm (floor 0.40; worst pair primary_SCL_scd41 \u2194 primary_SDA_scd41; 27 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
       "label": "Every via has a drilled hole; no orphans",
       "passed": true,
-      "message": "21 holes \u2014 every via lands on a drilled position"
+      "message": "17 holes \u2014 every via lands on a drilled position"
     },
     {
       "key": "endpoints_connected",
@@ -51,43 +51,11 @@
   ],
   "holes": [
     {
-      "source": "header",
-      "ref": "oled.h1",
-      "role": "female_1x4_2.54 pin 1",
-      "x": -5.08,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "header",
-      "ref": "oled.h2",
-      "role": "female_1x4_2.54 pin 2",
-      "x": -2.54,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "header",
-      "ref": "oled.h3",
-      "role": "female_1x4_2.54 pin 3",
-      "x": 0.0,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "header",
-      "ref": "oled.h4",
-      "role": "female_1x4_2.54 pin 4",
-      "x": 2.54,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
       "source": "pin",
       "ref": "bh1750.2",
       "role": "SDA",
       "x": 27.94,
-      "y": 2.54,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -95,7 +63,7 @@
       "ref": "bh1750.3",
       "role": "SCL",
       "x": 25.4,
-      "y": 2.54,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -103,7 +71,7 @@
       "ref": "bh1750.4",
       "role": "GND",
       "x": 22.86,
-      "y": 2.54,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -111,39 +79,7 @@
       "ref": "bh1750.5",
       "role": "VCC",
       "x": 20.32,
-      "y": 2.54,
-      "diameter": 1.25
-    },
-    {
-      "source": "pin",
-      "ref": "oled.1",
-      "role": "GND",
-      "x": -5.08,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "pin",
-      "ref": "oled.2",
-      "role": "VCC",
-      "x": -2.54,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "pin",
-      "ref": "oled.3",
-      "role": "SCL",
-      "x": 0.0,
-      "y": 10.16,
-      "diameter": 1.25
-    },
-    {
-      "source": "pin",
-      "ref": "oled.4",
-      "role": "SDA",
-      "x": 2.54,
-      "y": 10.16,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -151,7 +87,7 @@
       "ref": "scd41.1",
       "role": "GND",
       "x": 12.7,
-      "y": 5.08,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -159,7 +95,7 @@
       "ref": "scd41.2",
       "role": "VCC",
       "x": 10.16,
-      "y": 5.08,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -167,7 +103,7 @@
       "ref": "scd41.3",
       "role": "SCL",
       "x": 7.62,
-      "y": 5.08,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -175,7 +111,7 @@
       "ref": "scd41.4",
       "role": "SDA",
       "x": 5.08,
-      "y": 5.08,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -212,10 +148,26 @@
     },
     {
       "source": "via",
-      "ref": "primary_SDA_oled",
+      "ref": "primary_GND_bh1750",
+      "role": "via",
+      "x": 22.5,
+      "y": 2.5,
+      "diameter": 1.25
+    },
+    {
+      "source": "via",
+      "ref": "primary_GND_scd41",
       "role": "via",
       "x": 16.5,
-      "y": -1.5,
+      "y": 8.0,
+      "diameter": 1.25
+    },
+    {
+      "source": "via",
+      "ref": "primary_GND_scd41",
+      "role": "via",
+      "x": 16.5,
+      "y": 0.0,
       "diameter": 1.25
     },
     {
@@ -232,22 +184,6 @@
       "role": "via",
       "x": 1.0,
       "y": -12.5,
-      "diameter": 1.25
-    },
-    {
-      "source": "via",
-      "ref": "primary_VCC_scd41",
-      "role": "via",
-      "x": 1.0,
-      "y": 6.0,
-      "diameter": 1.25
-    },
-    {
-      "source": "via",
-      "ref": "primary_VCC_scd41",
-      "role": "via",
-      "x": 10.0,
-      "y": 7.5,
       "diameter": 1.25
     }
   ]
