@@ -454,9 +454,19 @@ def _finalise_collapse(
     # collapse so the resulting WireSegments inherit the corrected
     # geometry (chamfers + diagonals re-derived against the aligned
     # cell list).
-    from router.align import align_parallel_pitch, align_pair_pitch
+    from router.align import (
+        align_cluster_pitch,
+        align_pair_pitch,
+        align_parallel_pitch,
+        rebuild_raw_halos,
+    )
     align_pair_pitch(raw_paths, g, _forbidden_factory)
     align_parallel_pitch(raw_paths, g, _forbidden_factory, pitch_cells=5)
+    # Rebuild raw-cell halos before the cluster pass so its validation
+    # sees the CURRENT raw_cells positions (the two passes above shift
+    # cells but leave `g.blocked` reflecting the original routing).
+    rebuild_raw_halos(raw_paths, g, dims)
+    align_cluster_pitch(raw_paths, g, _forbidden_factory, pitch_cells=5)
 
     out: list[SignalPath] = []
     for raw in raw_paths:

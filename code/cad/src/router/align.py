@@ -593,6 +593,200 @@ def align_parallel_pitch(
             break
 
 
+def rebuild_raw_halos(raw_paths, g: "Grid", dims) -> None:
+    """Recompute `g.blocked` from each path's CURRENT `raw_cells`.
+
+    `g.blocked` is set once during routing and doesn't reflect shifts
+    done by post-route align passes (align_pair_pitch, align_parallel_pitch).
+    Subsequent passes that need validation against the current state
+    must call this first.
+
+    Preserves hard blockers (edge/pocket exclusions). Skips per-pin
+    approach corridors so own pins remain reachable for downstream
+    passes. Updates each `rp.halo_cells` to its new footprint.
+    """
+    halo_rad = max(1, round(
+        (dims.channel_width + dims.min_wall_thickness - g.res / 2) / g.res,
+    ))
+    hard = getattr(g, "_hard_blocked", set())
+    approach = getattr(g, "_pin_approach_cells", set())
+
+    for ly in range(2):
+        for gy in range(g.ny):
+            for gx in range(g.nx):
+                g.blocked[ly][gy][gx] = (ly, gy, gx) in hard
+
+    for rp in raw_paths:
+        footprint: set[tuple[int, int, int]] = set()
+        for cell in rp.raw_cells:
+            ly, gy, gx = cell
+            for dgy in range(-halo_rad, halo_rad + 1):
+                for dgx in range(-halo_rad, halo_rad + 1):
+                    ngy, ngx = gy + dgy, gx + dgx
+                    if not g.in_bounds(ngx, ngy):
+                        continue
+                    footprint.add((ly, ngy, ngx))
+                    if (ly, ngy, ngx) in approach:
+                        continue
+                    g.blocked[ly][ngy][ngx] = True
+        rp.halo_cells = footprint
+
+
+def align_cluster_pitch(
+    raw_paths,
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    *,
+    pitch_cells: int,
+) -> None:
+    """Break N≥3 deadlocks by shifting a whole cluster simultaneously.
+
+    When three parallel overlapping runs sit at sub-pitch spacing
+    (e.g. y=1, 2.5, 4 → pitches 1.5, 1.5 mm), no single shift can
+    succeed because each target slot is occupied by a neighbour. This
+    pass finds connected components of overlapping H L1 runs at <
+    2 * pitch_cells separation, then proposes a coordinated shift of
+    all members to a pitch grid (anchored at the southmost member's
+    current Y), with cascades through their branched siblings.
+
+    The validation excludes the cluster's own raw/halo/own_pin cells —
+    so a shift can place the new VCC trunk where the old GND halo
+    sits, because GND is also shifting and its old halo won't be
+    there in the final state.
+    """
+    h_runs: list[tuple[object, _Run]] = []
+    for rp in raw_paths:
+        for run in _find_runs(rp.raw_cells, _ALIGN_MIN_RUN_CELLS):
+            if run.axis != "H" or run.layer != 0:
+                continue
+            h_runs.append((rp, run))
+
+    # Union-find adjacency: two runs are clustered if they overlap in
+    # X and sit < 2*pitch_cells apart in Y (different paths).
+    n = len(h_runs)
+    parent = list(range(n))
+
+    def find(i: int) -> int:
+        while parent[i] != i:
+            parent[i] = parent[parent[i]]
+            i = parent[i]
+        return i
+
+    def union(i: int, j: int) -> None:
+        pi, pj = find(i), find(j)
+        if pi != pj:
+            parent[pi] = pj
+
+    for i in range(n):
+        rp_i, run_i = h_runs[i]
+        for j in range(i + 1, n):
+            rp_j, run_j = h_runs[j]
+            if rp_i is rp_j:
+                continue
+            ovlo = max(run_i.other_lo, run_j.other_lo)
+            ovhi = min(run_i.other_hi, run_j.other_hi)
+            if ovhi <= ovlo:
+                continue
+            diff = abs(run_i.constant - run_j.constant)
+            if 0 < diff < 2 * pitch_cells:
+                union(i, j)
+
+    groups: dict[int, list[int]] = {}
+    for i in range(n):
+        groups.setdefault(find(i), []).append(i)
+
+    for idxs in groups.values():
+        if len(idxs) < 3:
+            continue
+        cluster = sorted(
+            (h_runs[i] for i in idxs), key=lambda c: c[1].constant,
+        )
+        # Skip if cluster already aligned (all adjacent pairs at pitch).
+        ok = True
+        for a, b in zip(cluster, cluster[1:]):
+            if b[1].constant - a[1].constant != pitch_cells:
+                ok = False
+                break
+        if ok:
+            continue
+        _shift_cluster_to_pitch(
+            cluster, raw_paths, g, forbidden_check_factory, pitch_cells,
+        )
+
+
+def _shift_cluster_to_pitch(
+    cluster: list[tuple[object, "_Run"]],
+    raw_paths,
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    pitch_cells: int,
+) -> None:
+    """Attempt one coordinated shift of every cluster member to a pitch
+    grid anchored at the southmost member's current Y. Validates against
+    forbidden minus the cluster's own raw/halo/own_pin cells.
+    """
+    anchor_gy = cluster[0][1].constant
+    targets = [anchor_gy + k * pitch_cells for k in range(len(cluster))]
+
+    # cluster_allow = OLD cells of cluster members that are actually
+    # shifting (their old halos will disappear after shift, so don't
+    # treat them as blockers during validation). Non-shifting members'
+    # halos stay valid blockers, so we DON'T put them in allow.
+    # Shifted members' NEW cells are also NOT in allow — that would
+    # mask shift-to-shift collisions inside the cluster.
+    cluster_path_ids = {id(rp) for rp, _ in cluster}
+    cluster_allow: set[tuple[int, int, int]] = set()
+
+    proposals: list[tuple[object, list[tuple[int, int, int]]]] = []
+    branch_proposals: list[tuple[object, list[tuple[int, int, int]]]] = []
+    for (rp, run), target in zip(cluster, targets):
+        if target == run.constant:
+            continue
+        delta = target - run.constant
+        new_rp_cells = _shift_run(rp.raw_cells, run, target)
+        if new_rp_cells == rp.raw_cells:
+            return
+        proposals.append((rp, new_rp_cells))
+        cluster_allow.update(rp.raw_cells)
+        cluster_allow.update(rp.halo_cells)
+        cluster_allow.update(rp.own_pin_cells)
+
+        chain_start, chain_end = _chain_extent(rp.raw_cells, run)
+        chain_set = set(rp.raw_cells[chain_start:chain_end + 1])
+        for other in raw_paths:
+            if other is rp or id(other) in cluster_path_ids or not other.raw_cells:
+                continue
+            if other.raw_cells[0] in chain_set:
+                new_br_cells = _shift_branch_vertical_start(
+                    other.raw_cells, delta,
+                )
+                if new_br_cells is None:
+                    return
+                branch_proposals.append((other, new_br_cells))
+                cluster_allow.update(other.raw_cells)
+                cluster_allow.update(other.halo_cells)
+                cluster_allow.update(other.own_pin_cells)
+
+    if not proposals:
+        return
+
+    for rp, new_cells in proposals:
+        rp_forbidden = forbidden_check_factory(rp)
+        for c in new_cells:
+            if rp_forbidden(*c) and c not in cluster_allow:
+                return
+    for br, new_cells in branch_proposals:
+        br_forbidden = forbidden_check_factory(br)
+        for c in new_cells:
+            if br_forbidden(*c) and c not in cluster_allow:
+                return
+
+    for rp, new_cells in proposals:
+        rp.raw_cells = new_cells
+    for br, new_cells in branch_proposals:
+        br.raw_cells = new_cells
+
+
 def _try_shift_with_cascade(
     rp,
     run: "_Run",
