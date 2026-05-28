@@ -69,6 +69,27 @@ Rules of use:
   which a given printer-and-slicer combo closes the hole
   entirely. Empirically ~0.8 mm light-through, ~1.25 mm pin-fit on
   the validation hardware. See `docs/fdm_tolerance_notes.md`.
+- **Buffer** — the single universal minimum solid-material gap
+  enforced between every feature pair (sensor-pocket edge ↔ wire,
+  board edge ↔ channel, wire ↔ wire, via barrel ↔ neighbour).
+  Default 1.0 mm, per-board overridable. In the current code it is
+  the value historically called `min_wall_thickness`; every other
+  clearance derives from it. See `docs/breadboard-model.md`.
+- **Pitch / breadboard unit** — the 2.54 mm breadboard module that
+  is the canonical sizing and coordinate unit. Device placements,
+  perimeter, and bus spacing resolve to pitch multiples.
+- **Lead-in** — the countersink chamfer at a receptacle opening
+  that lets a DuPont pin self-centre as it enters the bore.
+- **Grip** — the receptacle's interference feature (a tapered or
+  slightly undersized lower bore) that holds a seated pin without
+  relying on slicer hole-compensation settings.
+- **Via** — a layer-transition hole drilled through the substrate
+  where a net moves between the L1 (bottom) and L2 (top) routing
+  faces. Bore unifies with the receptacle/pin hole (1.25 mm).
+- **Chamfer** — a 45° bevel that replaces a 90° corner on a wire
+  run. **Synchronised chamfers** are matching chamfers applied to
+  two bus traces running parallel at pitch, so companion signals
+  bend together as a bundle.
 
 ## See also
 

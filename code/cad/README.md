@@ -2,6 +2,15 @@
 
 Spike CAD for routing an ESP32-C3 + two I2C sensors through a 3D-printed PCB.
 
+## Dimension model + breadboard convention
+
+Clearances, hole sizes, and coordinates are organised around the 2.54 mm
+breadboard grid and a single universal `buffer`. See
+[`docs/breadboard-model.md`](../../docs/breadboard-model.md) for the model and
+[`docs/specs/breadboard-canonical-substrate/data-model.md`](../../docs/specs/breadboard-canonical-substrate/data-model.md)
+for the consolidated dimension schema (the `DimOverrides` knob surface and the
+`ResolvedDims` derived accessors).
+
 ## Vitamins (off-the-shelf parts modeled to scale)
 
 - `esp32_c3_supermini` / `esp32_c3_carrier` / `esp32_c3_assembly` — ESP32-C3 Supermini MCU and expansion carrier
