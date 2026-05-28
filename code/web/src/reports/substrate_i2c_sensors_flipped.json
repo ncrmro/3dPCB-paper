@@ -4,12 +4,12 @@
   "spec_path": "specs/i2c_sensors_flipped.yaml",
   "score": {
     "total_length_mm": 333.234,
-    "l1_length_mm": 306.198,
-    "l2_length_mm": 27.036,
+    "l1_length_mm": 305.198,
+    "l2_length_mm": 28.036,
     "via_count": 5,
     "edge_clearance_min_mm": 1.0,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 218.653
+    "aggregate": 219.653
   },
   "invariants": [
     {
@@ -225,7 +225,7 @@
       "ref": "primary_SDA_scd41",
       "role": "via",
       "x": 1.0,
-      "y": -13.0,
+      "y": -12.0,
       "diameter": 1.5
     },
     {

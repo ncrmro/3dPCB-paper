@@ -456,6 +456,201 @@ def align_pair_pitch(
                 break
 
 
+def _chain_extent(
+    cells: list[tuple[int, int, int]], run: "_Run",
+) -> tuple[int, int]:
+    """Walk forward/backward from `run` including any cells (across via
+    layer transitions) that share `run.constant` on the H axis.
+    """
+    chain_start = run.start_idx
+    while chain_start > 0 and cells[chain_start - 1][1] == run.constant:
+        chain_start -= 1
+    chain_end = run.end_idx
+    while chain_end + 1 < len(cells) and cells[chain_end + 1][1] == run.constant:
+        chain_end += 1
+    return chain_start, chain_end
+
+
+def _shift_branch_vertical_start(
+    cells: list[tuple[int, int, int]], delta: int,
+) -> list[tuple[int, int, int]] | None:
+    """If branch's first cells form a vertical run (constant gx, monotonic
+    gy on the same layer), shift the run's START gy by `delta` while
+    keeping the END gy fixed (trimming or extending the run).
+
+    Returns the new cell list, or None if the branch doesn't start with
+    a clean vertical run.
+    """
+    if len(cells) < 2:
+        return None
+    first = cells[0]
+    second = cells[1]
+    if second[0] != first[0] or second[2] != first[2]:
+        return None
+    if second[1] == first[1]:
+        return None
+    v_dir = 1 if second[1] > first[1] else -1
+    v_end_idx = 1
+    while (
+        v_end_idx + 1 < len(cells)
+        and cells[v_end_idx + 1][0] == first[0]
+        and cells[v_end_idx + 1][2] == first[2]
+        and (cells[v_end_idx + 1][1] - cells[v_end_idx][1]) == v_dir
+    ):
+        v_end_idx += 1
+    new_start_gy = first[1] + delta
+    end_gy = cells[v_end_idx][1]
+    if v_dir == 1 and new_start_gy >= end_gy:
+        return None
+    if v_dir == -1 and new_start_gy <= end_gy:
+        return None
+    new_v: list[tuple[int, int, int]] = []
+    gy = new_start_gy
+    while True:
+        new_v.append((first[0], gy, first[2]))
+        if gy == end_gy:
+            break
+        gy += v_dir
+    return new_v + list(cells[v_end_idx + 1:])
+
+
+def align_parallel_pitch(
+    raw_paths,
+    g: "Grid",
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+    *,
+    pitch_cells: int,
+) -> None:
+    """Snap any two long parallel cardinal runs that overlap in their
+    projected axis to be at exactly `pitch_cells` apart.
+
+    Generalises `align_pair_pitch` beyond bus pair-mates: for any pair
+    of cardinal H or V runs (same axis, same layer, overlapping in the
+    perpendicular axis) whose separation is < 2 * pitch_cells but != 0
+    and != pitch_cells, shift the path whose route would change less
+    so the two end up exactly `pitch_cells` apart.
+
+    Cascade: if the shifted run has sibling raw_paths rooted on it
+    (their `raw_cells[0]` lies inside the chain being shifted), the
+    sibling's first vertical run also shifts so the branch root tracks.
+    Atomic — if any cascade step fails validation, the whole shift is
+    skipped.
+
+    Same-net allow-list (source path's raw/halo/own_pin_cells) prevents
+    the source halo from spuriously blocking sibling-branch validation
+    in cascade.
+    """
+    # Collect all candidate runs across all paths, indexed by axis/layer
+    # for fast overlap queries.
+    all_runs: list[tuple[object, _Run]] = []
+    for rp in raw_paths:
+        for run in _find_runs(rp.raw_cells, _ALIGN_MIN_RUN_CELLS):
+            all_runs.append((rp, run))
+
+    # Iterate: each successful shift may unmask new candidate pairs.
+    max_iters = 16
+    while max_iters > 0:
+        max_iters -= 1
+        applied = False
+        # Try every ordered pair: shift second to be `pitch_cells` from first.
+        for i, (rp_a, run_a) in enumerate(all_runs):
+            for j, (rp_b, run_b) in enumerate(all_runs):
+                if i == j or rp_a is rp_b:
+                    continue
+                if run_a.axis != run_b.axis or run_a.layer != run_b.layer:
+                    continue
+                # Skip if not overlapping in projected axis.
+                overlap_lo = max(run_a.other_lo, run_b.other_lo)
+                overlap_hi = min(run_a.other_hi, run_b.other_hi)
+                if overlap_hi <= overlap_lo:
+                    continue
+                offset = run_b.constant - run_a.constant
+                if offset == 0:
+                    continue
+                sign = 1 if offset > 0 else -1
+                abs_offset = abs(offset)
+                # Only consider pairs already "near" pitch — don't try to
+                # snap a wire 20 cells away (likely intentionally separate).
+                if abs_offset >= 2 * pitch_cells:
+                    continue
+                if abs_offset == pitch_cells:
+                    continue  # already aligned
+                target_constant = run_a.constant + sign * pitch_cells
+                if _try_shift_with_cascade(
+                    rp_b, run_b, target_constant, raw_paths,
+                    forbidden_check_factory,
+                ):
+                    applied = True
+                    # Re-collect runs since indices have changed.
+                    all_runs = []
+                    for rp in raw_paths:
+                        for run in _find_runs(rp.raw_cells, _ALIGN_MIN_RUN_CELLS):
+                            all_runs.append((rp, run))
+                    break
+            if applied:
+                break
+        if not applied:
+            break
+
+
+def _try_shift_with_cascade(
+    rp,
+    run: "_Run",
+    target_constant: int,
+    raw_paths,
+    forbidden_check_factory: Callable[[object], Callable[[int, int, int], bool]],
+) -> bool:
+    """Attempt to shift `run` in `rp` to `target_constant`, cascading
+    through sibling paths whose seed cell is inside the chain being
+    shifted. Returns True iff applied. Validates atomically.
+    """
+    if run.axis != "H":
+        # V-axis chain cascade not yet implemented; skip.
+        return False
+    delta = target_constant - run.constant
+    if delta == 0:
+        return False
+
+    chain_start, chain_end = _chain_extent(rp.raw_cells, run)
+    chain_set = set(rp.raw_cells[chain_start:chain_end + 1])
+
+    branches: list[object] = []
+    for other in raw_paths:
+        if other is rp or not other.raw_cells:
+            continue
+        if other.raw_cells[0] in chain_set:
+            branches.append(other)
+
+    new_rp_cells = _shift_run(rp.raw_cells, run, target_constant)
+    if new_rp_cells == rp.raw_cells:
+        return False
+    rp_forbidden = forbidden_check_factory(rp)
+    if not _cells_safe(new_rp_cells, rp_forbidden):
+        return False
+
+    same_net_allow = (
+        set(rp.raw_cells) | set(rp.halo_cells) | set(rp.own_pin_cells)
+    )
+    branch_updates: list[tuple[object, list[tuple[int, int, int]]]] = []
+    for br in branches:
+        new_br_cells = _shift_branch_vertical_start(br.raw_cells, delta)
+        if new_br_cells is None:
+            return False
+        br_forbidden = forbidden_check_factory(br)
+        bad = [
+            c for c in new_br_cells
+            if br_forbidden(*c) and c not in same_net_allow
+        ]
+        if bad:
+            return False
+        branch_updates.append((br, new_br_cells))
+
+    rp.raw_cells = new_rp_cells
+    for br, new_cells in branch_updates:
+        br.raw_cells = new_cells
+    return True
+
+
 def _seg_length_mm(seg) -> float:
     dx = seg.end.x - seg.start.x
     dy = seg.end.y - seg.start.y
