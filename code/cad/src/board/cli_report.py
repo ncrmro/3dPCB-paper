@@ -117,7 +117,7 @@ def _inv_drilled_holes_match_vias(board: Board, paths) -> tuple[bool, str]:
 
 def _inv_wall_floor(board: Board, paths, dims) -> tuple[bool, str]:
     """Min centreline-to-centreline distance between different-net wires
-    on the same layer. Below `channel_width + min_wall_thickness` the
+    on the same layer. Below `channel_width + buffer` the
     substrate wall between the two wires drops below the printable
     floor — printer will merge them. Below that distance / 2 they'll
     actually short. The greedy router can dip into the advisory band
@@ -125,7 +125,7 @@ def _inv_wall_floor(board: Board, paths, dims) -> tuple[bool, str]:
     user can see the trade-off in the gallery.
     """
     import math
-    wall_floor = dims.channel_width + dims.min_wall_thickness
+    wall_floor = dims.wall_floor_mm
 
     def _net_id(name): return name.rsplit("_", 1)[0]
 
@@ -282,7 +282,7 @@ def _hole_table(board: Board, paths, dims) -> list[dict]:
                 "role": pin.role,
                 "x": round(pos.x, 3),
                 "y": round(pos.y, 3),
-                "diameter": dims.hole_diameter,
+                "diameter": dims.hole_bore_mm,
             })
         if inst.header is not None:
             conn = inst.header.resolved_connector()
@@ -337,7 +337,7 @@ def _build_report(spec_path: Path) -> dict:
         paths,
         board_extents=(base.w, base.h),
         channel_width=dims.channel_width,
-        min_wall_thickness=dims.min_wall_thickness,
+        min_wall_thickness=dims.buffer,
     )
     invariants = _run_invariants(board, paths, dims)
     if route_error is not None:

@@ -71,9 +71,9 @@ class DimOverrides(BaseModel):
     hole_diameter: float | None = None
     pocket_clearance: float | None = None
     overcut: float | None = None
-    min_wall_thickness: float | None = None
+    buffer: float | None = None  # universal min clearance; derives the rest
     edge_clearance: float | None = None
-    hole_pair_clearance: float | None = None
+    pitch: float | None = None  # breadboard module (2.54 mm)
 
     def applied(self) -> dict[str, float]:
         return {k: v for k, v in self.model_dump().items() if v is not None}

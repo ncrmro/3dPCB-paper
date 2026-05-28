@@ -239,7 +239,7 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     # pocket) or partially overhang it (in the margin). On L1 the
     # substrate is intact, so the wire approaches from underneath via
     # a via.
-    pocket_margin = dims.pocket_clearance + dims.channel_width / 2
+    pocket_margin = dims.pocket_margin_mm
     pocket_by_device: dict[str, Rect] = {}
     for inst in board.devices:
         if inst.header is not None:

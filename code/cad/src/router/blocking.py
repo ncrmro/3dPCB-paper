@@ -16,8 +16,8 @@ def _block_path(g: Grid, path: SignalPath, dims) -> set[tuple[int, int, int]]:
     for subsequent nets. Pin cells and their immediate approach corridors
     are never blocked — pins must remain reachable by their owning net.
 
-    Halo = `channel_width + min_wall_thickness − g.res/2`. With this
-    keep-out, cross-net wires sit at least `wall_floor` apart in open
+    Halo = `dims.wall_halo_mm(g.res)` (= `channel_width + buffer − res/2`).
+    With this keep-out, cross-net wires sit at least `wall_floor` apart in open
     space. The dense-pin parallel-axis approach + diagonal buffer
     (set up in `_build_grid`) cover the pin-row no-mans-land where
     halos would otherwise be relaxed.
@@ -34,8 +34,8 @@ def _block_path(g: Grid, path: SignalPath, dims) -> set[tuple[int, int, int]]:
     own halo, must not register as forbidden when its staircase
     collapses to a diagonal.
     """
-    halo = dims.channel_width + dims.min_wall_thickness - g.res / 2
-    via_halo = dims.via_diameter / 2 + dims.min_wall_thickness
+    halo = dims.wall_halo_mm(g.res)
+    via_halo = dims.via_halo_mm
     approach = getattr(g, "_pin_approach_cells", set())
     footprint: set[tuple[int, int, int]] = set()
 

@@ -29,7 +29,7 @@ def _score_board(spec_path: Path):
         paths,
         board_extents=(base.w, base.h),
         channel_width=dims.channel_width,
-        min_wall_thickness=dims.min_wall_thickness,
+        min_wall_thickness=dims.buffer,
     )
 
 

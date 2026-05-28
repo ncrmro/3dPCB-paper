@@ -35,9 +35,13 @@ _DEFAULTS: dict[str, float] = {
     "hole_diameter":      1.0,
     "pocket_clearance":   0.3,
     "overcut":            0.1,
-    "min_wall_thickness": 0.6,
+    # `buffer` is the universal min solid-material gap between any feature
+    # pair; every clearance below derives from it (see ResolvedDims accessors
+    # and docs/breadboard-model.md). Default stays at the historical
+    # min_wall_thickness value here; the switch to 1.0 is a later phase.
+    "buffer":             0.6,
     "edge_clearance":     0.8,
-    "hole_pair_clearance": 1.2,
+    "pitch":              2.54,  # breadboard module; snapping + spacing unit
 }
 
 
@@ -49,28 +53,56 @@ class ResolvedDims:
     hole_diameter: float
     pocket_clearance: float
     overcut: float
-    min_wall_thickness: float
+    buffer: float
     edge_clearance: float
-    hole_pair_clearance: float
+    pitch: float
     thickness: float  # base-plate thickness, derived from the base level
+
+    # ---- derived clearances (single source of truth) ------------------
+    # Each accessor is the ONLY definition of a formula that was previously
+    # duplicated across grid/blocking/score/align/cli_report. Keep numeric
+    # behaviour identical: every accessor reproduces its pre-consolidation
+    # value (1.4 / 1.15 / 1.35 / 1.0 / 0.7 / hole_diameter).
+
+    @property
+    def wall_floor_mm(self) -> float:
+        """Min centreline gap between two cross-net wires on a layer."""
+        return self.channel_width + self.buffer
+
+    def wall_halo_mm(self, res: float) -> float:
+        """Wire keep-out radius (mm) at grid resolution `res`."""
+        return self.channel_width + self.buffer - res / 2
+
+    @property
+    def via_halo_mm(self) -> float:
+        """Via keep-out radius (mm)."""
+        return self.via_diameter / 2 + self.buffer
+
+    @property
+    def edge_inflate_mm(self) -> float:
+        """Channel-edge inflation used for board-edge clearance scoring."""
+        return self.channel_width / 2 + self.buffer
+
+    @property
+    def pocket_margin_mm(self) -> float:
+        """L2 routing keep-out around a flat-mounted device pocket.
+
+        Uses `pocket_clearance` (not `buffer`) so the consolidation stays
+        behavior-preserving; folding this into `buffer` is a later phase.
+        """
+        return self.pocket_clearance + self.channel_width / 2
+
+    @property
+    def hole_bore_mm(self) -> float:
+        """Unified through-hole bore (receptacle / pin drill)."""
+        return self.hole_diameter
 
 
 def resolve_dims(board: Board) -> ResolvedDims:
     base = board.levels[0]
     merged = dict(_DEFAULTS)
     merged.update(board.dim.applied())
-    return ResolvedDims(
-        channel_width=merged["channel_width"],
-        channel_depth=merged["channel_depth"],
-        via_diameter=merged["via_diameter"],
-        hole_diameter=merged["hole_diameter"],
-        pocket_clearance=merged["pocket_clearance"],
-        overcut=merged["overcut"],
-        min_wall_thickness=merged["min_wall_thickness"],
-        edge_clearance=merged["edge_clearance"],
-        hole_pair_clearance=merged["hole_pair_clearance"],
-        thickness=base.thickness,
-    )
+    return ResolvedDims(thickness=base.thickness, **merged)
 
 
 # ---------------------------------------------------------------------------
@@ -177,7 +209,7 @@ def _cut_via(shape, via, dims: ResolvedDims, name: str) -> None:
 
 def _drill_pin_hole(shape, x: float, y: float, dims: ResolvedDims, name: str) -> None:
     """Drill a standard pin through-hole through the full plate."""
-    cyl = ad.Cylinder(r=dims.hole_diameter / 2, h=dims.thickness + 0.4)
+    cyl = ad.Cylinder(r=dims.hole_bore_mm / 2, h=dims.thickness + 0.4)
     shape.add_at(
         cyl.hole(name).at("centre"),
         post=ad.translate([x, y, 0]),

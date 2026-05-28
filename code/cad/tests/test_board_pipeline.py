@@ -142,7 +142,7 @@ def test_wire_to_wire_wall_floor(board_and_paths):
     import math
 
     board, paths, dims = board_and_paths
-    wall_floor = dims.channel_width + dims.min_wall_thickness
+    wall_floor = dims.wall_floor_mm
     # Hard floor: half wall-floor — below this the wires would short or
     # merge during printing. Above this, the wall is thinner than the
     # printable optimum but the substrate still works.

@@ -605,9 +605,7 @@ def rebuild_raw_halos(raw_paths, g: "Grid", dims) -> None:
     approach corridors so own pins remain reachable for downstream
     passes. Updates each `rp.halo_cells` to its new footprint.
     """
-    halo_rad = max(1, round(
-        (dims.channel_width + dims.min_wall_thickness - g.res / 2) / g.res,
-    ))
+    halo_rad = max(1, round(dims.wall_halo_mm(g.res) / g.res))
     hard = getattr(g, "_hard_blocked", set())
     approach = getattr(g, "_pin_approach_cells", set())
 
