@@ -41,8 +41,8 @@ shrinks the surface.**
 | `channel_width` | float \| None | 0.8 | kept | Wire channel width |
 | `channel_depth` | float \| None | 0.8 | kept | Channel cut depth |
 | `overcut` | float \| None | 0.1 | kept | CSG over-cut margin |
-| `pocket_clearance` | float \| None | folded into `buffer` (Phase 2) | deprecating | Was independent 0.3 |
-| `edge_clearance` | float \| None | folded into `buffer` (Phase 2) | deprecating | Was independent 0.8 |
+| `pocket_clearance` | float \| None | 0.3 | **kept** | Device drop-in fit + pocket routing margin; folding into `buffer` chokes the sensor approach and breaks dense-board routability |
+| `edge_clearance` | float \| None | 0.8 | **kept** | Board-outline keep-out strip; left independent of `buffer` |
 | `min_wall_thickness` | float \| None | renamed → `buffer` | renaming | Was 0.6; it *is* the buffer |
 | `hole_pair_clearance` | float \| None | — | **DELETE** | Defined 3×, consumed 0× (dead) |
 
@@ -55,19 +55,27 @@ plus **derived accessors** that are the *only* definition of each clearance
 formula. Today these formulas are duplicated across modules; consolidating them
 here is the core of Phase 1.
 
-| Accessor | Derivation | Current value | Replaces (today duplicated at) |
+| Accessor | Derivation | Value (buffer=1.0) | Replaces (today duplicated at) |
 |----------|-----------|---------------|-------------------------------|
-| `wall_floor_mm` | `channel_width + buffer` | 1.4 | `cli_report.py:128` |
-| `wall_halo_mm` | `channel_width + buffer − res/2` | 1.15 | `blocking.py:37`, `align.py:616` |
-| `via_halo_mm` | `via_diameter/2 + buffer` | 1.35 | `blocking.py:38` |
-| `edge_inflate_mm` | `channel_width/2 + buffer` | 1.0 | `score.py:149` |
-| `pocket_margin_mm` | `buffer + channel_width/2` | 0.7→1.4* | `grid.py:242`, `build.py:287` |
+| `wall_floor_mm` | `channel_width + buffer` | 1.8 | `cli_report.py:128` |
+| `wall_halo_mm` | `channel_width + buffer − res/2` | 1.55 | `blocking.py:37`, `align.py:616` |
+| `via_halo_mm` | `via_diameter/2 + buffer` | 1.75 | `blocking.py:38` |
+| `edge_inflate_mm` | `channel_width/2 + buffer` | 1.4 | `score.py:149` |
+| `pocket_margin_mm` | `pocket_clearance + channel_width/2` | 0.7 | `grid.py:242`, `build.py:287` |
 | `hole_bore_mm` | `hole_diameter` | 1.0→1.25 | `build.py:180`, `connectors.py` |
 
-\* `pocket_margin_mm` changes value when `pocket_clearance` (0.3) folds into
-`buffer` (Phase 2). In Phase 1 it must reproduce the current 0.7 exactly (keep
-`pocket_clearance` as the term), so the consolidation stays behavior-preserving;
-the value moves only in Phase 2.
+The wire/via gaps (`wall_floor`, `wall_halo`, `via_halo`, `edge_inflate`) scale
+with `buffer`; `pocket_margin` stays on its own `pocket_clearance` knob.
+
+**Phase-2 finding — buffer vs breadboard pitch.** At `buffer=1.0` the
+`wall_floor` invariant (1.8 mm) is *unachievable* between cross-net wires that
+squeeze past adjacent 2.54 mm-pitch pins: two 0.8 mm channels plus 1.0 mm walls
+don't fit in the gap, and the pin-approach corridors (kept open for
+routability) let a foreign-net wire sit ~1.5 mm away. The buffer **is** met in
+open space, where wall strength matters. The dense reference boards therefore
+report `wall_floor` failures near pins by design (fail-loud, per the
+clarification); `i2c_starter` additionally relaxes its own `buffer` to 0.6 so it
+still routes. New spacious boards (e.g. `i2c_midline_no_oled`) pass cleanly.
 
 **Lifecycle:** constructed once per `build_board` / `route_board` call; immutable
 thereafter. No persistence, no migration — it is recomputed from the spec each

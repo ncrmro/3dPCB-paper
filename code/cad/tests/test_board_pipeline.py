@@ -28,6 +28,7 @@ from board import (
     Rect,
     load_board,
 )
+from board.board import DimOverrides
 from board.build import build_board, resolve_dims, synthesize_header_levels
 from board.buses import HintWaypoint, RoutingHint
 from router.autoroute import route_board
@@ -345,7 +346,10 @@ def _starter_board(**overrides) -> Board:
         slaves=("scd41", "bh1750", "oled"),
         routing_hints=overrides.get("routing_hints", {}),
     )
-    return Board(name="hint_test", levels=base, devices=devices, buses=(bus,))
+    # Mirror i2c_starter.yaml's buffer relaxation — this dense four-device
+    # board can't route at the 1.0 default with the current router.
+    return Board(name="hint_test", levels=base, devices=devices, buses=(bus,),
+                 dim=DimOverrides(buffer=0.6))
 
 
 def test_hint_prefer_layer_pushes_signal_off_l1():

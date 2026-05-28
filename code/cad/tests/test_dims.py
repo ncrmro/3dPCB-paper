@@ -1,10 +1,12 @@
-"""Golden-output guard for the dimension consolidation.
+"""Guard for the universal-buffer dimension model.
 
 The breadboard-canonical refactor (docs/specs/breadboard-canonical-substrate)
 collapses the scattered clearance family into a single `buffer` knob plus
-derived accessors on `ResolvedDims`. Phase 1 is *behavior-preserving*: every
-derived accessor must reproduce its pre-consolidation numeric value. These
-assertions lock that in so a later value change can't silently regress Phase 1.
+derived accessors on `ResolvedDims`. Phase 2 raised the buffer default to
+1.0 mm for FDM strength; the wire/via gaps (wall_floor, wall_halo, via_halo,
+edge_inflate) scale with it, while pocket_margin stays on its own
+`pocket_clearance` knob (folding it breaks dense-board routability). These
+assertions lock the derivations so a later change can't silently move them.
 """
 
 from __future__ import annotations
@@ -31,27 +33,28 @@ def _minimal_board(dim: DimOverrides | None = None) -> Board:
 
 
 def test_buffer_and_pitch_defaults():
-    assert _DEFAULTS["buffer"] == 0.6
+    assert _DEFAULTS["buffer"] == 1.0
     assert _DEFAULTS["pitch"] == 2.54
 
 
-def test_derived_accessors_reproduce_legacy_values():
+def test_derived_accessors_match_buffer_derivation():
     dims = resolve_dims(_minimal_board())
-    # Values that previously lived as duplicated literals/formulas across
-    # build/grid/blocking/score/align/cli_report.
-    assert dims.wall_floor_mm == pytest.approx(1.4)          # 0.8 + 0.6
-    assert dims.wall_halo_mm(0.5) == pytest.approx(1.15)     # 0.8 + 0.6 - 0.25
-    assert dims.via_halo_mm == pytest.approx(1.35)           # 1.5/2 + 0.6
-    assert dims.edge_inflate_mm == pytest.approx(1.0)        # 0.8/2 + 0.6
-    assert dims.pocket_margin_mm == pytest.approx(0.7)       # 0.3 + 0.8/2
+    # Each accessor is the single definition of a formula that used to be
+    # duplicated across build/grid/blocking/score/align/cli_report. The
+    # wire/via gaps scale with buffer (1.0); pocket_margin does not.
+    assert dims.wall_floor_mm == pytest.approx(1.8)          # 0.8 + 1.0
+    assert dims.wall_halo_mm(0.5) == pytest.approx(1.55)     # 0.8 + 1.0 - 0.25
+    assert dims.via_halo_mm == pytest.approx(1.75)           # 1.5/2 + 1.0
+    assert dims.edge_inflate_mm == pytest.approx(1.4)        # 0.8/2 + 1.0
+    assert dims.pocket_margin_mm == pytest.approx(0.7)       # 0.3 + 0.8/2 (own knob)
     assert dims.hole_bore_mm == pytest.approx(1.0)           # hole_diameter
 
 
 def test_buffer_override_propagates_to_derivations():
-    dims = resolve_dims(_minimal_board(DimOverrides(buffer=1.0)))
-    assert dims.buffer == 1.0
-    assert dims.wall_floor_mm == pytest.approx(1.8)          # 0.8 + 1.0
-    assert dims.via_halo_mm == pytest.approx(1.75)           # 0.75 + 1.0
+    dims = resolve_dims(_minimal_board(DimOverrides(buffer=0.6)))
+    assert dims.buffer == 0.6
+    assert dims.wall_floor_mm == pytest.approx(1.4)          # 0.8 + 0.6
+    assert dims.via_halo_mm == pytest.approx(1.35)           # 0.75 + 0.6
 
 
 def test_removed_knobs_are_rejected():

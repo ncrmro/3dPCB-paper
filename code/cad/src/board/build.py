@@ -37,9 +37,8 @@ _DEFAULTS: dict[str, float] = {
     "overcut":            0.1,
     # `buffer` is the universal min solid-material gap between any feature
     # pair; every clearance below derives from it (see ResolvedDims accessors
-    # and docs/breadboard-model.md). Default stays at the historical
-    # min_wall_thickness value here; the switch to 1.0 is a later phase.
-    "buffer":             0.6,
+    # and docs/breadboard-model.md).
+    "buffer":             1.0,
     "edge_clearance":     0.8,
     "pitch":              2.54,  # breadboard module; snapping + spacing unit
 }
@@ -87,8 +86,10 @@ class ResolvedDims:
     def pocket_margin_mm(self) -> float:
         """L2 routing keep-out around a flat-mounted device pocket.
 
-        Uses `pocket_clearance` (not `buffer`) so the consolidation stays
-        behavior-preserving; folding this into `buffer` is a later phase.
+        Stays on `pocket_clearance`, not `buffer`: widening this gap to a
+        full buffer chokes the sensor approach and makes the dense reference
+        boards unroutable, so the pocket keep-out remains its own knob (the
+        device drop-in fit tolerance) while wire/via gaps scale with buffer.
         """
         return self.pocket_clearance + self.channel_width / 2
 

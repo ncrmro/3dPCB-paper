@@ -1,5 +1,14 @@
 name: i2c_starter
 
+# This is the densest reference board (four devices incl. the OLED on a
+# 68x50 plate). The global buffer default is 1.0 mm for FDM strength, but
+# the OLED's north branches plus the sensor trunks can't satisfy 1.0 here
+# with the current router — it raises a clear RouteFailure. Rather than
+# silently relax (the constitution forbids auto-relax), this board
+# explicitly relaxes its own buffer: the declarative escape hatch.
+dim:
+  buffer: 0.6
+
 # Base plate only — the OLED's pedestal is auto-generated from its
 # `header:` declaration, not described here as a separate level.
 levels:
