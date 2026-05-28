@@ -341,6 +341,46 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     g._pin_approach_by_pin = pin_approach_by_pin
     g._pin_buffer_by_pin = pin_buffer_by_pin
 
+    # No-turn exclusion zones around drilled holes. A routed channel must
+    # run STRAIGHT out of a via/pin until it clears the hole's buffer
+    # exclusion zone plus half a channel width, before a 90° bend is
+    # allowed — so a turn is never stacked on top of a hole and stays
+    # padded from it by a full `buffer`. The radius scales with `buffer`,
+    # like every other clearance. A* forbids planar bends in these cells
+    # (see `_astar`); the straight lead-out keeps the geometry clean and
+    # avoids the "stub-then-turn right on the hole" artifact.
+    # Radius = the hole's buffer exclusion zone (`hole_bore/2 + buffer`).
+    # The fuller "+ channel_width" the rule implies overruns the tighter
+    # boards' pin-approach corridors; the exclusion zone alone already
+    # lifts every turn off the hole and pads it by ~a buffer.
+    turn_clear_mm = dims.hole_bore_mm / 2 + dims.buffer
+    turn_clear_cells = max(1, round(turn_clear_mm / g.res))
+    no_turn_cells: set[tuple[int, int, int]] = set()
+    no_turn_by_pin: dict[tuple[int, int], set[tuple[int, int, int]]] = {}
+    for inst in board.devices:
+        device = inst.resolved_device()
+        for pin in device.pins:
+            pos = device.pin_position_at(inst.position, inst.rotation, pin)
+            if (round(pos.x, 3), round(pos.y, 3)) not in bus_endpoint_xys:
+                continue
+            cgx, cgy = g.to_grid(pos.x, pos.y)
+            zone: set[tuple[int, int, int]] = set()
+            for dgy in range(-turn_clear_cells, turn_clear_cells + 1):
+                for dgx in range(-turn_clear_cells, turn_clear_cells + 1):
+                    if dgx * dgx + dgy * dgy > turn_clear_cells * turn_clear_cells:
+                        continue
+                    nx, ny = cgx + dgx, cgy + dgy
+                    if g.in_bounds(nx, ny):
+                        zone.add((0, ny, nx))
+                        zone.add((1, ny, nx))
+            no_turn_by_pin[(cgx, cgy)] = zone
+            no_turn_cells |= zone
+    g._no_turn_cells = no_turn_cells
+    # Per-pin zones so the router can exempt the pin a wire is currently
+    # routing TO (the approach turn must be allowed), while keeping the
+    # exit-turn ban at the start pin and every other hole.
+    g._no_turn_by_pin = no_turn_by_pin
+
     # Hard blockers — cells the post-route collapse must NEVER step on,
     # even when they sit inside the path's own exclusive halo. These
     # are physical impossibilities (no substrate, or board edge), not

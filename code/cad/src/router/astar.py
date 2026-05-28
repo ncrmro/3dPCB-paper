@@ -90,6 +90,7 @@ def _astar(
     layer_step_mul: tuple[float, float] = (1.0, 1.0),
     parallel_target_cells: set[tuple[int, int, int]] | None = None,
     parallel_pitch_cells: int | None = None,
+    no_turn_cells: set[tuple[int, int, int]] = frozenset(),
 ) -> list[tuple[int, int, int]] | None:
     """A* on the (layer, gy, gx) grid.
 
@@ -216,6 +217,14 @@ def _astar(
                 step_cost += _W_CROSS_LAYER
             step_dir = (0, dy, dx)
             if prev_dir is not None and prev_dir != step_dir:
+                # Forbid a planar 90° bend inside a drilled hole's
+                # exclusion zone: the channel must run straight out of a
+                # via/pin past its buffer zone before turning, so the turn
+                # is padded from the hole by a full buffer. `prev_dir[0]==0`
+                # restricts this to planar→planar turns; a via→planar exit
+                # (prev_dir[0]≠0) is the wire leaving a via and is allowed.
+                if prev_dir[0] == 0 and cur in no_turn_cells and nbr not in own_pin_cells:
+                    continue
                 step_cost += _W_BEND
             new_g = gc + step_cost
             if new_g < g_cost.get(nbr, math.inf):

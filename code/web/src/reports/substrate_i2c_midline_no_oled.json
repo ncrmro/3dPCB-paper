@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_no_oled",
   "spec_path": "specs/i2c_midline_no_oled.yaml",
   "score": {
-    "total_length_mm": 275.406,
-    "l1_length_mm": 262.406,
+    "total_length_mm": 274.527,
+    "l1_length_mm": 261.527,
     "l2_length_mm": 13.0,
     "via_count": 4,
     "edge_clearance_min_mm": 0.1,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 170.703
+    "aggregate": 170.263
   },
   "invariants": [
     {

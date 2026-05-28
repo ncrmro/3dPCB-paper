@@ -243,7 +243,16 @@ def _route_one_net(
 
         full_cells: list[tuple[int, int, int]] = []
         starts = initial_starts
+        all_no_turn = getattr(g, "_no_turn_cells", frozenset())
+        no_turn_by_pin = getattr(g, "_no_turn_by_pin", {})
         for leg_no, goals in enumerate(leg_goals):
+            # Exempt the no-turn zone around THIS leg's goal pin so the
+            # wire can make its final approach turn into the pin; every
+            # other hole (incl. the start pin) keeps its straight-exit ban.
+            exempt: set[tuple[int, int, int]] = set()
+            for (_, ggy, ggx) in goals:
+                exempt |= no_turn_by_pin.get((ggx, ggy), frozenset())
+            leg_no_turn = all_no_turn - exempt if exempt else all_no_turn
             cells = _astar(
                 g, starts, goals,
                 pin_cells=pin_cells - own_pin_cells,
@@ -252,6 +261,7 @@ def _route_one_net(
                 layer_step_mul=layer_step_mul,
                 parallel_target_cells=parallel_target_cells,
                 parallel_pitch_cells=parallel_pitch_cells,
+                no_turn_cells=leg_no_turn,
             )
             if cells is None:
                 where = (
