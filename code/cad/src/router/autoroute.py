@@ -473,7 +473,7 @@ def _finalise_collapse(
         exclusive = {c for c in raw.halo_cells if owners.get(c, 0) <= 1}
         cells = _collapse_one_raw(g, raw, exclusive)
         waypoints = _path_to_waypoints(g, cells)
-        path = waypoints_to_path(raw.name, waypoints)
+        path = waypoints_to_path(raw.name, waypoints, via_diameter=dims.via_diameter)
         # Re-halo with the (possibly diagonal) collapsed geometry so
         # subsequent collapses in this loop see the new footprint.
         # The earlier axis-aligned halo for this path's staircase is

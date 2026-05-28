@@ -300,7 +300,7 @@ def _hole_table(board: Board, paths, dims) -> list[dict]:
                     "role": f"{inst.header.connector} pin {i + 1}",
                     "x": round(px, 3),
                     "y": round(py, 3),
-                    "diameter": conn.drill_diameter,
+                    "diameter": dims.hole_bore_mm,
                 })
     for p in paths:
         for elt in p.elements:

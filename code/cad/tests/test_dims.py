@@ -44,17 +44,17 @@ def test_derived_accessors_match_buffer_derivation():
     # wire/via gaps scale with buffer (1.0); pocket_margin does not.
     assert dims.wall_floor_mm == pytest.approx(1.8)          # 0.8 + 1.0
     assert dims.wall_halo_mm(0.5) == pytest.approx(1.55)     # 0.8 + 1.0 - 0.25
-    assert dims.via_halo_mm == pytest.approx(1.75)           # 1.5/2 + 1.0
+    assert dims.via_halo_mm == pytest.approx(1.625)          # 1.25/2 + 1.0
     assert dims.edge_inflate_mm == pytest.approx(1.4)        # 0.8/2 + 1.0
     assert dims.pocket_margin_mm == pytest.approx(0.7)       # 0.3 + 0.8/2 (own knob)
-    assert dims.hole_bore_mm == pytest.approx(1.0)           # hole_diameter
+    assert dims.hole_bore_mm == pytest.approx(1.25)          # unified bore
 
 
 def test_buffer_override_propagates_to_derivations():
     dims = resolve_dims(_minimal_board(DimOverrides(buffer=0.6)))
     assert dims.buffer == 0.6
     assert dims.wall_floor_mm == pytest.approx(1.4)          # 0.8 + 0.6
-    assert dims.via_halo_mm == pytest.approx(1.35)           # 0.75 + 0.6
+    assert dims.via_halo_mm == pytest.approx(1.225)          # 1.25/2 + 0.6
 
 
 def test_removed_knobs_are_rejected():

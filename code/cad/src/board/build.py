@@ -31,10 +31,16 @@ from board.pins import Pin, Point2D
 _DEFAULTS: dict[str, float] = {
     "channel_width":      0.8,
     "channel_depth":      0.8,
-    "via_diameter":       1.5,
-    "hole_diameter":      1.0,
+    # Unified bore: receptacle drill = via = the FDM-validated 1.25 mm DuPont
+    # bore (coupon v2, docs/fdm_tolerance_notes.md). `via_diameter` tracks
+    # `hole_diameter` unless a board overrides it (see resolve_dims).
+    "via_diameter":       1.25,
+    "hole_diameter":      1.25,
     "pocket_clearance":   0.3,
     "overcut":            0.1,
+    # 45° countersink at each receptacle's top opening so a DuPont pin
+    # self-guides into the straight 1.25 mm grip bore below it.
+    "lead_in_depth":      0.6,
     # `buffer` is the universal min solid-material gap between any feature
     # pair; every clearance below derives from it (see ResolvedDims accessors
     # and docs/breadboard-model.md).
@@ -55,6 +61,7 @@ class ResolvedDims:
     buffer: float
     edge_clearance: float
     pitch: float
+    lead_in_depth: float
     thickness: float  # base-plate thickness, derived from the base level
 
     # ---- derived clearances (single source of truth) ------------------
@@ -103,6 +110,9 @@ def resolve_dims(board: Board) -> ResolvedDims:
     base = board.levels[0]
     merged = dict(_DEFAULTS)
     merged.update(board.dim.applied())
+    # Vias share the unified bore unless the board overrides them explicitly.
+    if board.dim.via_diameter is None:
+        merged["via_diameter"] = merged["hole_diameter"]
     return ResolvedDims(thickness=base.thickness, **merged)
 
 
@@ -208,13 +218,29 @@ def _cut_via(shape, via, dims: ResolvedDims, name: str) -> None:
     )
 
 
-def _drill_pin_hole(shape, x: float, y: float, dims: ResolvedDims, name: str) -> None:
-    """Drill a standard pin through-hole through the full plate."""
-    cyl = ad.Cylinder(r=dims.hole_bore_mm / 2, h=dims.thickness + 0.4)
+def _drill_pin_hole(
+    shape, x: float, y: float, dims: ResolvedDims, top_z: float, name: str,
+) -> None:
+    """Drill a pin through-hole + a top-face lead-in countersink.
+
+    The straight bore is the FDM-validated 1.25 mm DuPont grip; a 45°
+    lead-in chamfer at the top opening lets a pin self-guide into it. For
+    pins under a device pocket the cone subtracts from already-removed
+    material (a CSG no-op); elsewhere it chamfers the solid top face.
+    """
+    bore_r = dims.hole_bore_mm / 2
+    cyl = ad.Cylinder(r=bore_r, h=dims.thickness + 0.4)
     shape.add_at(
         cyl.hole(name).at("centre"),
         post=ad.translate([x, y, 0]),
     )
+    lead = dims.lead_in_depth
+    if lead > 0:
+        cone = ad.Cone(h=lead + dims.overcut, r_base=bore_r, r_top=bore_r + lead)
+        shape.add_at(
+            cone.hole(f"{name}_leadin").at("centre"),
+            post=ad.translate([x, y, top_z - lead / 2 + dims.overcut / 2]),
+        )
 
 
 def _cut_pocket(shape, footprint: Rect, depth: float, z_centre: float, name: str) -> None:
@@ -340,7 +366,7 @@ class BoardSubstrate(ad.CompositeShape):
                 if (round(abs_pos.x, 3), round(abs_pos.y, 3)) not in endpoint_xys:
                     continue
                 _drill_pin_hole(
-                    maker, abs_pos.x, abs_pos.y, dims,
+                    maker, abs_pos.x, abs_pos.y, dims, base_level.z_end,
                     name=f"pin_{inst.name}_{i}",
                 )
             if inst.header is not None:
@@ -358,7 +384,7 @@ class BoardSubstrate(ad.CompositeShape):
                         px = inst.position.x
                         py = inst.position.y + (offset if inst.rotation == 90 else -offset)
                     cyl = ad.Cylinder(
-                        r=conn.drill_diameter / 2,
+                        r=dims.hole_bore_mm / 2,
                         h=pedestal_h + dims.overcut,
                     )
                     maker.add_at(
