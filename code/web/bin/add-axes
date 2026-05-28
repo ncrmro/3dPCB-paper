@@ -141,16 +141,18 @@ def _bake(path: Path, axis_scale: float, grid_y_offset: float, with_grid: bool) 
     bbox = scene.bounds
     extent = float(np.max(bbox[1] - bbox[0])) * axis_scale
 
-    # Anchor the gnomon to the model's bottom-centre, NOT the glTF
-    # origin. KiCad GLBs live at world coords ~(0.14, 0, 0.085)m so
-    # axes at origin would float ~10cm away from the actual board.
-    # Pivoting at (cx, ymin, cz) keeps the gnomon planted under the
-    # model regardless of its absolute world position.
+    # Anchor the gnomon to the model's bottom-most-left corner (minX,
+    # minY, minZ), NOT the glTF origin or the model centre. KiCad GLBs
+    # live at world coords ~(0.14, 0, 0.085)m so axes at the glTF
+    # origin would float far from the board; anchoring at the bbox
+    # corner keeps the gnomon planted at the substrate's "0,0,0" corner
+    # so the X/Y/Z arrows lay along the board edges instead of
+    # bisecting the model.
     anchor = np.array(
         [
-            (bbox[0][0] + bbox[1][0]) / 2.0,
+            float(bbox[0][0]),
             float(bbox[0][1]) + grid_y_offset,
-            (bbox[0][2] + bbox[1][2]) / 2.0,
+            float(bbox[0][2]),
         ],
         dtype=np.float64,
     )
