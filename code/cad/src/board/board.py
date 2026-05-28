@@ -74,6 +74,7 @@ class DimOverrides(BaseModel):
     buffer: float | None = None  # universal min clearance; derives the rest
     edge_clearance: float | None = None
     pitch: float | None = None  # breadboard module (2.54 mm)
+    pitch_subdivisions: float | None = None  # routing cells per pitch; res = pitch / this
 
     def applied(self) -> dict[str, float]:
         return {k: v for k, v in self.model_dump().items() if v is not None}

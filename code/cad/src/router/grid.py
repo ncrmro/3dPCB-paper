@@ -14,21 +14,27 @@ dataclass fields is a follow-up.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Iterable
 from dataclasses import dataclass, field
 
 from board.board import Board
 from board.devices import Rect
 
+# Fallback grid resolution. The real resolution is derived per board from
+# the pitch (`ResolvedDims.res = pitch / pitch_subdivisions`) and threaded
+# into `Grid.from_board`, so the lattice is commensurate with the
+# breadboard grid. This constant is only the default for direct `Grid`
+# construction (tests / synthetic grids).
 GRID_RES_MM = 0.5
 
 # Per-pin "approach corridor" depth in grid cells. The owning net is
 # always allowed to step on these cells (so a pin remains reachable
 # even after neighbouring halos crowd in); other nets are excluded.
-# Pin pitch on STEMMA QT sensors is 2.54 mm = 5 grid cells at 0.5 mm
-# resolution, so a 3-cell corridor leaves 2 cells of slack between
-# adjacent pins' corridors — enough for the wall floor not to collapse
-# at the pin row.
+# Pin pitch on STEMMA QT sensors is 2.54 mm = 5 grid cells at the default
+# 0.508 mm resolution (pitch/5), so a 3-cell corridor leaves 2 cells of
+# slack between adjacent pins' corridors — enough for the wall floor not to
+# collapse at the pin row.
 APPROACH_DEPTH = 3
 
 # Parallel-axis reserve at a dense-cluster pin: how many cells along the
@@ -56,11 +62,24 @@ class Grid:
     blocked: list[list[list[bool]]] = field(default_factory=list)
 
     @classmethod
-    def from_board(cls, board: Board) -> Grid:
+    def from_board(cls, board: Board, res: float = GRID_RES_MM) -> Grid:
         perim = board.levels[0].perimeter
+        # Snap the grid origin and far edge onto the global `res` lattice.
+        # Device pins are placed on pitch multiples and the pitch is an
+        # integer number of `res` cells, so a lattice-aligned origin makes
+        # every pin land exactly on a cell — vias and corners stop rounding
+        # off the pin column. Snap inward (ceil the min, floor the max) so
+        # the grid stays a subset of the board; the < res strip trimmed at
+        # each edge already sits inside the edge-clearance keep-out, so no
+        # routable area is lost.
+        x_min = math.ceil(perim.x_min / res) * res
+        y_min = math.ceil(perim.y_min / res) * res
+        x_max = math.floor(perim.x_max / res) * res
+        y_max = math.floor(perim.y_max / res) * res
         g = cls(
-            x_min=perim.x_min, y_min=perim.y_min,
-            width=perim.w, height=perim.h,
+            x_min=x_min, y_min=y_min,
+            width=x_max - x_min, height=y_max - y_min,
+            res=res,
         )
         nx = int(round(g.width / g.res)) + 1
         ny = int(round(g.height / g.res)) + 1
@@ -173,7 +192,7 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     don't act as obstacles for the net that targets them. Other nets
     treat them as blocked.
     """
-    g = Grid.from_board(board)
+    g = Grid.from_board(board, res=dims.res)
 
     # Edge clearance: forbid a strip along the board outline so channels
     # don't run flush against the edge.
@@ -211,8 +230,8 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     # pins' corridors OVERLAP, two cross-net wires can route through
     # the overlap and the wall floor between them collapses to 0.5 mm.
     #
-    # SCD41/BH1750 pin pitch is 2.54 mm = 5 grid cells at 0.5 mm
-    # resolution. A 1-cell cardinal corridor (pin ±1 in x and y) means
+    # SCD41/BH1750 pin pitch is 2.54 mm = 5 grid cells at the default
+    # 0.508 mm resolution (pitch/5). A 1-cell cardinal corridor (pin ±1 in x and y) means
     # adjacent pins' corridors sit 2 cells apart — no overlap, no
     # wall-floor collapse, and each pin keeps at least one free
     # approach cell on each layer for A* to step from.

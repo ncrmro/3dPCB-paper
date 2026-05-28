@@ -470,13 +470,17 @@ def _finalise_collapse(
         align_parallel_pitch,
         rebuild_raw_halos,
     )
+    # One pitch is an exact integer number of cells now that the grid is
+    # commensurate (res = pitch / pitch_subdivisions), so derive it rather
+    # than hardcoding the old 5-cell ≈ 2.5 mm approximation.
+    pitch_cells = max(1, round(dims.pitch / g.res))
     align_pair_pitch(raw_paths, g, _forbidden_factory)
-    align_parallel_pitch(raw_paths, g, _forbidden_factory, pitch_cells=5)
+    align_parallel_pitch(raw_paths, g, _forbidden_factory, pitch_cells=pitch_cells)
     # Rebuild raw-cell halos before the cluster pass so its validation
     # sees the CURRENT raw_cells positions (the two passes above shift
     # cells but leave `g.blocked` reflecting the original routing).
     rebuild_raw_halos(raw_paths, g, dims)
-    align_cluster_pitch(raw_paths, g, _forbidden_factory, pitch_cells=5)
+    align_cluster_pitch(raw_paths, g, _forbidden_factory, pitch_cells=pitch_cells)
 
     out: list[SignalPath] = []
     for raw in raw_paths:

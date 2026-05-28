@@ -47,6 +47,11 @@ _DEFAULTS: dict[str, float] = {
     "buffer":             1.0,
     "edge_clearance":     0.8,
     "pitch":              2.54,  # breadboard module; snapping + spacing unit
+    # Routing-grid cells per pitch. The grid resolution is derived as
+    # `pitch / pitch_subdivisions` so the lattice is commensurate with the
+    # breadboard: 5 → 0.508 mm cells, and every 2.54 mm pin lands exactly on
+    # a cell. See docs/specs/breadboard-native-routing-grid/plan.md.
+    "pitch_subdivisions": 5,
 }
 
 
@@ -61,6 +66,7 @@ class ResolvedDims:
     buffer: float
     edge_clearance: float
     pitch: float
+    pitch_subdivisions: float
     lead_in_depth: float
     thickness: float  # base-plate thickness, derived from the base level
 
@@ -106,6 +112,14 @@ class ResolvedDims:
     def hole_bore_mm(self) -> float:
         """Unified through-hole bore (receptacle / pin drill)."""
         return self.hole_diameter
+
+    @property
+    def res(self) -> float:
+        """Routing-grid cell size. Derived so the pitch is an integer number
+        of cells (`pitch / pitch_subdivisions`), making the lattice
+        commensurate with the breadboard grid — pins, vias, and corners land
+        exactly on cells instead of rounding off the pitch lattice."""
+        return self.pitch / self.pitch_subdivisions
 
 
 def resolve_dims(board: Board) -> ResolvedDims:

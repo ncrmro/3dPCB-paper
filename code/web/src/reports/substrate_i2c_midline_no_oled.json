@@ -3,13 +3,13 @@
   "class": "Substrate_i2c_midline_no_oled",
   "spec_path": "specs/i2c_midline_no_oled.yaml",
   "score": {
-    "total_length_mm": 274.527,
-    "l1_length_mm": 261.527,
-    "l2_length_mm": 13.0,
+    "total_length_mm": 277.831,
+    "l1_length_mm": 264.623,
+    "l2_length_mm": 13.208,
     "via_count": 4,
-    "edge_clearance_min_mm": 0.1,
+    "edge_clearance_min_mm": 0.008,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 170.263
+    "aggregate": 172.124
   },
   "invariants": [
     {
@@ -22,19 +22,19 @@
       "key": "edge_clearance",
       "label": "Channels \u2265 edge_clearance from board outline",
       "passed": true,
-      "message": "min centreline \u2192 edge: 1.50 mm (threshold 0.40; in primary_GND_scd41)"
+      "message": "min centreline \u2192 edge: 1.41 mm (threshold 0.40; in primary_GND_scd41)"
     },
     {
       "key": "wall_floor",
       "label": "Cross-net wires \u2265 channel_width + min_wall_thickness apart",
       "passed": true,
-      "message": "min cross-net centreline: 2.00 mm (floor 1.80; worst pair primary_SCL \u2194 primary_SDA; 0 sample pairs below the floor)"
+      "message": "min cross-net centreline: 2.03 mm (floor 1.80; worst pair primary_SCL \u2194 primary_SDA; 0 sample pairs below the floor)"
     },
     {
       "key": "wall_floor_cross_layer",
       "label": "Cross-net wires on opposite layers don't project-overlap (advisory)",
       "passed": false,
-      "message": "min cross-layer centreline: 0.00 mm (floor 0.40; worst pair primary_SCL_scd41 \u2194 primary_SDA_scd41; 18 sample pairs below the floor)"
+      "message": "min cross-layer centreline: 0.00 mm (floor 0.40; worst pair primary_VCC_bh1750 \u2194 primary_GND_scd41; 16 sample pairs below the floor)"
     },
     {
       "key": "drilled_holes_match_vias",
@@ -150,32 +150,32 @@
       "source": "via",
       "ref": "primary_GND_scd41",
       "role": "via",
-      "x": 12.5,
-      "y": 10.5,
+      "x": 12.7,
+      "y": 10.668,
       "diameter": 1.25
     },
     {
       "source": "via",
       "ref": "primary_GND_scd41",
       "role": "via",
-      "x": 12.5,
-      "y": 2.5,
+      "x": 12.7,
+      "y": 2.54,
       "diameter": 1.25
     },
     {
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": -5.0,
-      "y": -7.5,
+      "x": -5.08,
+      "y": -7.62,
       "diameter": 1.25
     },
     {
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": -5.0,
-      "y": -2.5,
+      "x": -5.08,
+      "y": -2.54,
       "diameter": 1.25
     }
   ]
