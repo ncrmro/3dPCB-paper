@@ -33,12 +33,6 @@ models:
 - name: substrate_i2c_midline_sensors
   glb: /models/cad/substrate_i2c_midline_sensors.glb
   camera: top
-- name: substrate_i2c_sensors_flipped
-  glb: /models/cad/substrate_i2c_sensors_flipped.glb
-  camera: top
-- name: substrate_i2c_starter
-  glb: /models/cad/substrate_i2c_starter.glb
-  camera: top
 - name: esp32_c3_assembly
   glb: /models/cad/esp32_c3_assembly.glb
   camera: iso

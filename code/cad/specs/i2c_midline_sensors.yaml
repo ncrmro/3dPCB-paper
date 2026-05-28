@@ -1,31 +1,33 @@
 name: i2c_midline_sensors
 
-# Sensor pin rows aligned to the board midline (y = 0). SCD41 + BH1750
-# are rotated 180° so their PCBs cantilever SOUTH of the pin row,
-# clearing the OLED's pedestal in the north half. Positions are picked
-# so the pin row centre lands exactly on y = 0:
+# Quick-print I²C substrate WITH the OLED: ESP32-C3 master + SCD41 +
+# BH1750 sensors + an SSD1306 OLED on a 4-pin female header.
 #
-#   - SCD41 pin row at device-local y = +9.605 (after 180° flip from
-#     the canonical −9.605), so position.y = −9.605 lands it on 0.
-#   - BH1750 pin row at device-local y = +8.00 (after 180° flip from
-#     −8.00), so position.y = −8.0 lands it on 0.
-#
-# This gives the router a longer master→slave corridor (ESP32 SCL/SDA
-# at y ≈ −15 versus pins at y = 0) but a cleaner south band for L2
-# routing under the sensors.
+# Same principle as i2c_midline_no_oled: the devices are spread across
+# a 98×68 plate so all four I²C nets route at the GENEROUS default
+# buffer (1.0 mm), keeping a full 1.0 mm wall between every channel,
+# every sensor recess AND across the OLED branch off the trunk. The
+# OLED's extra north branch crowds the SCL/SDA trunk, so this board
+# needs more spread than the no-OLED variant to stay fully clean (every
+# cross-net wall ≥ buffer, not just above the half-floor). No
+# `dim.buffer` override — the default is the target wall thickness.
 levels:
   - name: base
-    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    perimeter: { cx: 0, cy: 0, w: 98, h: 68 }
     z_start: -1.5
     z_end: 1.5
 
+# Sensors rotated 180° (pin rows face north toward the ESP32 bus pins,
+# PCBs cantilever south), pin rows landing on y ≈ -4 for one east-west
+# trunk. The OLED is header-mounted in the north band (its display PCB
+# cantilevers further north off a pedestal — no pocket is carved for it).
 devices:
-  - { name: u1, device: esp32_c3_supermini, position: { x: -21, y: -7 } }
-  - { name: scd41,  device: scd41,  position: { x:  9, y: -9.6 }, rotation: 180 }
-  - { name: bh1750, device: bh1750, position: { x: 25, y: -8 },   rotation: 180 }
+  - { name: u1,     device: esp32_c3_supermini, position: { x: -26, y: -4 } }
+  - { name: scd41,  device: scd41,  position: { x: 10, y: -13.6 },  rotation: 180 }
+  - { name: bh1750, device: bh1750, position: { x: 32, y: -11.98 }, rotation: 180 }
   - name: oled
     device: oled_ssd1306
-    position: { x: 0, y: 15 }
+    position: { x: 0, y: 16 }
     header: { connector: female_1x4_2.54 }
 
 buses:

@@ -49,11 +49,12 @@ and any neighbour. Concretely (current values, 0.5 mm grid):
 | wire halo (grid keep-out) | `channel_width + buffer − res/2` | 1.15 |
 | via halo | `via_diameter/2 + buffer` | 1.35 |
 | channel ↔ board edge (score) | `channel_width/2 + buffer` | 1.0 |
-| pocket margin (routing) | `pocket_clearance + channel_width/2` | 0.7\* |
+| pocket margin (routing) | `pocket_clearance + buffer + channel_width/2` | 1.3\* |
 
-\* The pocket margin is the lone hold-out: it currently uses `pocket_clearance`
-(0.3), not the buffer. Folding it into the buffer is a deliberate value change,
-not part of the behavior-preserving consolidation.
+\* The pocket margin carries a full `buffer` wall between a top channel and the
+device recess, like every other gap; `pocket_clearance` (0.3) is only the
+device drop-in fit. Boards are spread out so this is routable at the generous
+default — see the data-model finding on buffer vs breadboard pitch.
 
 **Therefore:** `min_wall_thickness` *is* the buffer. Promote it to a single
 `buffer` knob (default 1.0 mm, justified by the ~0.4 mm worst-case FDM

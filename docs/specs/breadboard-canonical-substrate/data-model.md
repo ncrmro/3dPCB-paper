@@ -41,7 +41,7 @@ shrinks the surface.**
 | `channel_width` | float \| None | 0.8 | kept | Wire channel width |
 | `channel_depth` | float \| None | 0.8 | kept | Channel cut depth |
 | `overcut` | float \| None | 0.1 | kept | CSG over-cut margin |
-| `pocket_clearance` | float \| None | 0.3 | **kept** | Device drop-in fit + pocket routing margin; folding into `buffer` chokes the sensor approach and breaks dense-board routability |
+| `pocket_clearance` | float \| None | 0.3 | **kept** | Device drop-in fit tolerance (sizes the recess). The pocket *routing* margin adds a full `buffer` wall on top — see `pocket_margin_mm` |
 | `edge_clearance` | float \| None | 0.8 | **kept** | Board-outline keep-out strip; left independent of `buffer` |
 | `min_wall_thickness` | float \| None | renamed → `buffer` | renaming | Was 0.6; it *is* the buffer |
 | `hole_pair_clearance` | float \| None | — | **DELETE** | Defined 3×, consumed 0× (dead) |
@@ -61,21 +61,25 @@ here is the core of Phase 1.
 | `wall_halo_mm` | `channel_width + buffer − res/2` | 1.55 | `blocking.py:37`, `align.py:616` |
 | `via_halo_mm` | `via_diameter/2 + buffer` | 1.75 | `blocking.py:38` |
 | `edge_inflate_mm` | `channel_width/2 + buffer` | 1.4 | `score.py:149` |
-| `pocket_margin_mm` | `pocket_clearance + channel_width/2` | 0.7 | `grid.py:242`, `build.py:287` |
+| `pocket_margin_mm` | `pocket_clearance + buffer + channel_width/2` | 1.7 | `grid.py:242`, `build.py:93` |
 | `hole_bore_mm` | `hole_diameter` | 1.0→1.25 | `build.py:180`, `connectors.py` |
 
-The wire/via gaps (`wall_floor`, `wall_halo`, `via_halo`, `edge_inflate`) scale
-with `buffer`; `pocket_margin` stays on its own `pocket_clearance` knob.
+Every gap — `wall_floor`, `wall_halo`, `via_halo`, `edge_inflate` **and**
+`pocket_margin` — scales with `buffer`, so the channel-to-recess wall is the
+same thickness as any other wall. `pocket_clearance` remains only the device
+drop-in fit tolerance.
 
-**Phase-2 finding — buffer vs breadboard pitch.** At `buffer=1.0` the
-`wall_floor` invariant (1.8 mm) is *unachievable* between cross-net wires that
-squeeze past adjacent 2.54 mm-pitch pins: two 0.8 mm channels plus 1.0 mm walls
-don't fit in the gap, and the pin-approach corridors (kept open for
-routability) let a foreign-net wire sit ~1.5 mm away. The buffer **is** met in
-open space, where wall strength matters. The dense reference boards therefore
-report `wall_floor` failures near pins by design (fail-loud, per the
-clarification); `i2c_starter` additionally relaxes its own `buffer` to 0.6 so it
-still routes. New spacious boards (e.g. `i2c_midline_no_oled`) pass cleanly.
+**Finding — buffer vs breadboard pitch, and the resolution.** Folding the full
+`buffer` into the pocket margin (so the recess wall is a real wall, not a
+knife-edge) makes the cramped 68×50 reference layouts unroutable: the inflated
+pocket keep-outs choke the 2.54 mm-pitch pin-approach corridors, so routing only
+succeeds if `buffer` collapses back to ~0.2–0.4 — re-thinning the wall. The fix
+is to **size the plate to the routing, not the reverse**: spread the devices so
+the corridors reopen at the generous default. Both production boards then route
+at `buffer=1.0` and pass `wall_floor` cleanly with zero violations
+(`i2c_midline_no_oled` on 78×50; `i2c_midline_sensors` on 98×68 — the OLED's
+extra trunk branch needs the larger plate). The cramped reference boards
+(`i2c_starter`, `i2c_sensors_flipped`) were retired.
 
 **Lifecycle:** constructed once per `build_board` / `route_board` call; immutable
 thereafter. No persistence, no migration — it is recomputed from the spec each

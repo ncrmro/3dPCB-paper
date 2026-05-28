@@ -68,7 +68,7 @@ def test_pinouts_register_devices():
 def test_i2c_bus_resolves_to_four_nets():
     """An I²C bus expands to VCC + GND + SCL + SDA, each carrying the
     master + every slave pin for that signal."""
-    board = load_board(SPECS_DIR / "i2c_starter.yaml")
+    board = load_board(SPECS_DIR / "i2c_midline_sensors.yaml")
     nets = board.nets()
     by_signal = {n.signal: n for n in nets}
     assert set(by_signal) == {"VCC", "GND", "SCL", "SDA"}
@@ -312,7 +312,7 @@ def test_drilled_holes_match_signal_path_vias(board_and_paths):
 def test_build_board_produces_anchorscad_shape():
     """The build pipeline turns a Board into something AnchorSCAD can
     render — no exception, no missing attribute."""
-    board = load_board(SPECS_DIR / "i2c_starter.yaml")
+    board = load_board(SPECS_DIR / "i2c_midline_sensors.yaml")
     shape = build_board(board)
     assert shape.name == board.name
     # Triggers @datatree __post_init__ -> build() if not already.
@@ -346,10 +346,13 @@ def _starter_board(**overrides) -> Board:
         slaves=("scd41", "bh1750", "oled"),
         routing_hints=overrides.get("routing_hints", {}),
     )
-    # Mirror i2c_starter.yaml's buffer relaxation — this dense four-device
-    # board can't route at the 1.0 default with the current router.
+    # Deliberately cramped 68×50 four-device fixture used only to exercise
+    # the router under congestion (the production boards spread out for a
+    # full buffer wall — see specs/). At the 1.0 default the buffer-derived
+    # pocket margin makes this density unroutable, so the fixture relaxes
+    # to 0.2; wall thickness is irrelevant here, only the routing topology.
     return Board(name="hint_test", levels=base, devices=devices, buses=(bus,),
-                 dim=DimOverrides(buffer=0.6))
+                 dim=DimOverrides(buffer=0.2))
 
 
 def test_hint_prefer_layer_pushes_signal_off_l1():
@@ -447,7 +450,7 @@ def test_header_synthesises_pedestal_level():
     """A headered device (the OLED) yields exactly one synthesised
     pedestal Level over its position, with the connector's standard
     height."""
-    board = load_board(SPECS_DIR / "i2c_starter.yaml")
+    board = load_board(SPECS_DIR / "i2c_midline_sensors.yaml")
     headers = synthesize_header_levels(board)
     assert len(headers) == 1
     pedestal = headers[0]

@@ -1,20 +1,29 @@
 name: i2c_midline_no_oled
 
-# Variant of `i2c_midline_sensors` without the OLED. Keeps the SCD41
-# + BH1750 south-of-midline pair so the routing reveals the master →
-# sensor trunks cleanly without the OLED's north-bound branches
-# obscuring the back-corner pitch issues.
-
+# Quick-print I²C substrate WITHOUT the OLED: just the ESP32-C3 master
+# and the SCD41 + BH1750 sensors on the bus.
+#
+# Layout note: the devices are spread across a 78×50 plate so the four
+# I²C nets route at the GENEROUS default buffer (1.0 mm) — i.e. every
+# wire channel keeps a full 1.0 mm wall to the next channel AND to each
+# sensor recess. Cramming the devices closer chokes the pin-approach
+# corridors and forces the buffer down (thin, unprintable recess walls),
+# so the plate is sized to the routing, not the other way round. No
+# `dim.buffer` override here: the default IS the target.
 levels:
   - name: base
-    perimeter: { cx: 0, cy: 0, w: 68, h: 50 }
+    perimeter: { cx: 0, cy: 0, w: 78, h: 50 }
     z_start: -1.5
     z_end: 1.5
 
+# Sensors rotated 180° so their pin rows face north (toward the ESP32's
+# bus pins) and their PCB bodies cantilever south. The y offsets land
+# every pin row on y ≈ 2 (esp32 centre row), giving one clean east-west
+# trunk with short north stubs to each sensor.
 devices:
-  - { name: u1, device: esp32_c3_supermini, position: { x: -21, y: -7 } }
-  - { name: scd41,  device: scd41,  position: { x:  9, y: -9.6 }, rotation: 180 }
-  - { name: bh1750, device: bh1750, position: { x: 25, y: -8 },   rotation: 180 }
+  - { name: u1,     device: esp32_c3_supermini, position: { x: -26, y: 2 } }
+  - { name: scd41,  device: scd41,  position: { x: 4,  y: -7.6 },  rotation: 180 }
+  - { name: bh1750, device: bh1750, position: { x: 24, y: -5.98 }, rotation: 180 }
 
 buses:
   - { kind: i2c, name: primary, master: u1, slaves: [scd41, bh1750] }

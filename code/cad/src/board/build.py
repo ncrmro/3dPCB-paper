@@ -93,12 +93,14 @@ class ResolvedDims:
     def pocket_margin_mm(self) -> float:
         """L2 routing keep-out around a flat-mounted device pocket.
 
-        Stays on `pocket_clearance`, not `buffer`: widening this gap to a
-        full buffer chokes the sensor approach and makes the dense reference
-        boards unroutable, so the pocket keep-out remains its own knob (the
-        device drop-in fit tolerance) while wire/via gaps scale with buffer.
+        The recess wall sits `pocket_clearance` (the device drop-in fit
+        tolerance) outside the footprint; on top of that we keep a full
+        `buffer`-thick wall before the channel edge, so the channel-to-recess
+        wall is `buffer` — the same gap every other feature pair gets. Both
+        terms are board-overridable (relax `buffer` on a dense board that
+        can't route the generous default; `i2c_starter` does this).
         """
-        return self.pocket_clearance + self.channel_width / 2
+        return self.pocket_clearance + self.buffer + self.channel_width / 2
 
     @property
     def hole_bore_mm(self) -> float:

@@ -3,10 +3,11 @@
 The breadboard-canonical refactor (docs/specs/breadboard-canonical-substrate)
 collapses the scattered clearance family into a single `buffer` knob plus
 derived accessors on `ResolvedDims`. Phase 2 raised the buffer default to
-1.0 mm for FDM strength; the wire/via gaps (wall_floor, wall_halo, via_halo,
-edge_inflate) scale with it, while pocket_margin stays on its own
-`pocket_clearance` knob (folding it breaks dense-board routability). These
-assertions lock the derivations so a later change can't silently move them.
+1.0 mm for FDM strength; every clearance (wall_floor, wall_halo, via_halo,
+edge_inflate, pocket_margin) scales with it, so the pocket recess gets the
+same buffer-thick wall as any other feature pair. `pocket_clearance` is kept
+only as the device drop-in fit tolerance. These assertions lock the
+derivations so a later change can't silently move them.
 """
 
 from __future__ import annotations
@@ -46,7 +47,7 @@ def test_derived_accessors_match_buffer_derivation():
     assert dims.wall_halo_mm(0.5) == pytest.approx(1.55)     # 0.8 + 1.0 - 0.25
     assert dims.via_halo_mm == pytest.approx(1.625)          # 1.25/2 + 1.0
     assert dims.edge_inflate_mm == pytest.approx(1.4)        # 0.8/2 + 1.0
-    assert dims.pocket_margin_mm == pytest.approx(0.7)       # 0.3 + 0.8/2 (own knob)
+    assert dims.pocket_margin_mm == pytest.approx(1.7)       # 0.3 + 1.0 + 0.8/2 (buffer wall)
     assert dims.hole_bore_mm == pytest.approx(1.25)          # unified bore
 
 
@@ -55,6 +56,7 @@ def test_buffer_override_propagates_to_derivations():
     assert dims.buffer == 0.6
     assert dims.wall_floor_mm == pytest.approx(1.4)          # 0.8 + 0.6
     assert dims.via_halo_mm == pytest.approx(1.225)          # 1.25/2 + 0.6
+    assert dims.pocket_margin_mm == pytest.approx(1.3)       # 0.3 + 0.6 + 0.8/2
 
 
 def test_removed_knobs_are_rejected():
