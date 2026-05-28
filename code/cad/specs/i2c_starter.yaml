@@ -24,7 +24,10 @@ levels:
 # geometry from the connector's body footprint.
 devices:
   - { name: u1,     device: esp32_c3_supermini, position: { x: -21, y: -7 } }
-  - { name: scd41,  device: scd41,              position: { x:  9,  y: -6 } }
+  # scd41 sits one breadboard pitch left of the original spot: once every
+  # device snaps its pin lattice to the 2.54 mm grid, this is the nearest
+  # on-grid placement that still routes on this dense four-device board.
+  - { name: scd41,  device: scd41,              position: { x: 6.46, y: -6 } }
   - { name: bh1750, device: bh1750,             position: { x: 25,  y: -8 } }
   - name: oled
     device: oled_ssd1306

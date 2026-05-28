@@ -331,7 +331,7 @@ def _starter_board(**overrides) -> Board:
         DeviceInstance(name="u1", device="esp32_c3_supermini",
                        position=Point2D(x=-21, y=-7)),
         DeviceInstance(name="scd41", device="scd41",
-                       position=Point2D(x=9, y=-6)),
+                       position=Point2D(x=6.46, y=-6)),
         DeviceInstance(name="bh1750", device="bh1750",
                        position=Point2D(x=25, y=-8)),
         DeviceInstance(name="oled", device="oled_ssd1306",

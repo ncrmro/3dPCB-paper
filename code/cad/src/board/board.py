@@ -136,6 +136,39 @@ class Board(BaseModel):
         return self
 
     @model_validator(mode="after")
+    def _snap_devices_to_pitch(self) -> Board:
+        """Snap each device so its pin lattice lands on the breadboard grid.
+
+        The pins within a device already sit on a `pitch` (2.54 mm) grid, so
+        we shift the whole device as a GROUP by the residual between its
+        first pin and the board grid — aligning every pin to the breadboard
+        grid. (Rounding the reference point instead would leave the pins
+        off-grid, since the reference point isn't itself a pin.) On by
+        default; a board sets `dim.pitch` to change the module.
+        """
+        pitch = self.dim.pitch or 2.54
+        snapped = []
+        changed = False
+        for d in self.devices:
+            device = d.resolved_device()
+            if not device.pins:
+                snapped.append(d)
+                continue
+            ref = device.pin_position_at(d.position, d.rotation, device.pins[0])
+            dx = round(ref.x / pitch) * pitch - ref.x
+            dy = round(ref.y / pitch) * pitch - ref.y
+            if abs(dx) > 1e-9 or abs(dy) > 1e-9:
+                changed = True
+                d = d.model_copy(update={"position": Point2D(
+                    x=round(d.position.x + dx, 4),
+                    y=round(d.position.y + dy, 4),
+                )})
+            snapped.append(d)
+        if changed:
+            object.__setattr__(self, "devices", tuple(snapped))
+        return self
+
+    @model_validator(mode="after")
     def _buses_reference_known_devices(self) -> Board:
         instance_names = {d.name for d in self.devices}
         for bus in self.buses:
