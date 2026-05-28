@@ -32,6 +32,7 @@ from board.board import DimOverrides
 from board.build import build_board, resolve_dims, synthesize_header_levels
 from board.buses import HintWaypoint, RoutingHint
 from router.autoroute import route_board
+from router.grid import Grid
 from vitamins.substrate import Via, WireSegment
 
 SPECS_DIR = Path(__file__).resolve().parent.parent / "specs"
@@ -52,6 +53,48 @@ def board_and_paths(request):
     dims = resolve_dims(board)
     paths = route_board(board, dims)
     return board, paths, dims
+
+
+# ---------------------------------------------------------------------------
+# Breadboard-lattice alignment
+# ---------------------------------------------------------------------------
+
+
+def _assert_pins_on_pitch_lattice(board, dims):
+    """Every device pin maps to an exact pitch-index grid node.
+
+    Requires both the commensurate resolution (res = pitch/N) and a
+    pitch-anchored origin (perimeter grown to pitch). Without the perimeter
+    snap the origin is only a `res` multiple, so pins round to ~0.25mm off —
+    the via-drift this whole effort fixes.
+    """
+    g = Grid.from_board(board, res=dims.res)
+    pitch = dims.pitch
+    assert abs(g.x_min / pitch - round(g.x_min / pitch)) < 1e-6, "origin x off pitch"
+    assert abs(g.y_min / pitch - round(g.y_min / pitch)) < 1e-6, "origin y off pitch"
+    for inst in board.devices:
+        dev = inst.resolved_device()
+        for pin in dev.pins:
+            p = dev.pin_position_at(inst.position, inst.rotation, pin)
+            gx, gy = g.to_grid(p.x, p.y)
+            wx, wy = g.to_world(gx, gy)
+            tag = f"{inst.name} pin {pin.index}"
+            assert abs(wx - p.x) < 1e-6, f"{tag} x round-trip off-lattice: {p.x} -> {wx}"
+            assert abs(wy - p.y) < 1e-6, f"{tag} y round-trip off-lattice: {p.y} -> {wy}"
+            npx = (p.x - g.x_min) / pitch
+            npy = (p.y - g.y_min) / pitch
+            assert abs(npx - round(npx)) < 1e-6, f"{tag} x not on a pitch node"
+            assert abs(npy - round(npy)) < 1e-6, f"{tag} y not on a pitch node"
+
+
+def test_pins_land_on_pitch_lattice(board_and_paths):
+    board, _paths, dims = board_and_paths
+    _assert_pins_on_pitch_lattice(board, dims)
+
+
+def test_starter_board_pins_on_pitch_lattice():
+    board = _starter_board()
+    _assert_pins_on_pitch_lattice(board, resolve_dims(board))
 
 
 # ---------------------------------------------------------------------------

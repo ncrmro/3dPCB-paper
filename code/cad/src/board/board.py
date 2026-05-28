@@ -9,6 +9,7 @@ builder consume.
 
 from __future__ import annotations
 
+import math
 from typing import Any, Literal
 
 from pydantic import (
@@ -167,6 +168,36 @@ class Board(BaseModel):
             snapped.append(d)
         if changed:
             object.__setattr__(self, "devices", tuple(snapped))
+        return self
+
+    @model_validator(mode="after")
+    def _snap_perimeter_to_pitch(self) -> Board:
+        """Grow the base plate outward to the enclosing pitch rectangle.
+
+        The routing-grid origin is the base perimeter's min corner, so for
+        pins (already on pitch) to map to exact lattice nodes the perimeter
+        edges must themselves be pitch multiples. Growing — never shrinking —
+        keeps every device inside, never clips routable area, and only widens
+        edge clearance (it grows away from the parts). Idempotent once the
+        perimeter is on pitch.
+        """
+        pitch = self.dim.pitch or 2.54
+        base = self.levels[0]
+        p = base.perimeter
+        x_min = math.floor(p.x_min / pitch) * pitch
+        x_max = math.ceil(p.x_max / pitch) * pitch
+        y_min = math.floor(p.y_min / pitch) * pitch
+        y_max = math.ceil(p.y_max / pitch) * pitch
+        if (abs(x_min - p.x_min) < 1e-9 and abs(x_max - p.x_max) < 1e-9
+                and abs(y_min - p.y_min) < 1e-9 and abs(y_max - p.y_max) < 1e-9):
+            return self
+        grown = base.model_copy(update={"perimeter": Rect(
+            cx=round((x_min + x_max) / 2, 6),
+            cy=round((y_min + y_max) / 2, 6),
+            w=round(x_max - x_min, 6),
+            h=round(y_max - y_min, 6),
+        )})
+        object.__setattr__(self, "levels", (grown, *self.levels[1:]))
         return self
 
     @model_validator(mode="after")
