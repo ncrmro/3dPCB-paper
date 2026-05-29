@@ -46,10 +46,13 @@ def _reports_dir() -> Path:
 
 def _inv_angles(paths) -> tuple[bool, str]:
     bad = []
+    sharp = []
     allowed = (0, 45, 90, 135, 180, -45, -90, -135, -180)
     for p in paths:
+        prev = None  # previous WireSegment, for the turn check
         for elt in p.elements:
             if not isinstance(elt, WireSegment):
+                prev = None  # a via ends the planar run; the next is unconstrained
                 continue
             dx = elt.end.x - elt.start.x
             dy = elt.end.y - elt.start.y
@@ -58,9 +61,26 @@ def _inv_angles(paths) -> tuple[bool, str]:
             angle = math.degrees(math.atan2(dy, dx))
             if not any(abs(angle - a) < 0.05 for a in allowed):
                 bad.append(f"{p.name} @ {angle:.2f}°")
+            # Turn between contiguous segments must stay ≤ 90°. A larger
+            # direction change leaves an acute (< 90°) interior corner — a
+            # sub-45° spike no channel can be printed around.
+            if prev is not None and (
+                abs(prev.end.x - elt.start.x) < 1e-6
+                and abs(prev.end.y - elt.start.y) < 1e-6
+            ):
+                pa = math.degrees(math.atan2(
+                    prev.end.y - prev.start.y, prev.end.x - prev.start.x))
+                turn = abs(((angle - pa + 180) % 360) - 180)
+                if turn > 90 + 0.05:
+                    sharp.append(
+                        f"{p.name} {turn:.1f}° @ "
+                        f"({elt.start.x:.2f},{elt.start.y:.2f})")
+            prev = elt
     if bad:
         return False, f"non-cardinal segments: {bad[:3]}"
-    return True, "all segments cardinal or exact-45°"
+    if sharp:
+        return False, f"acute turns (> 90° bend): {sharp[:3]}"
+    return True, "all segments cardinal/45° with no acute turns"
 
 
 def _inv_edge_clearance(board: Board, paths, dims) -> tuple[bool, str]:
@@ -248,7 +268,8 @@ def _inv_endpoints_connected(board: Board, paths) -> tuple[bool, str]:
 
 def _run_invariants(board: Board, paths, dims) -> list[dict]:
     suite = [
-        ("angles_45_or_90", "45°/axis-aligned segments only", lambda: _inv_angles(paths)),
+        ("angles_45_or_90", "45°/axis-aligned segments, no acute turns",
+         lambda: _inv_angles(paths)),
         ("edge_clearance", "Channels ≥ edge_clearance from board outline",
          lambda: _inv_edge_clearance(board, paths, dims)),
         ("wall_floor", "Cross-net wires ≥ channel_width + min_wall_thickness apart",

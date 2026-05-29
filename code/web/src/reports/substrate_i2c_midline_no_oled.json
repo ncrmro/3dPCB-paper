@@ -3,20 +3,20 @@
   "class": "Substrate_i2c_midline_no_oled",
   "spec_path": "specs/i2c_midline_no_oled.yaml",
   "score": {
-    "total_length_mm": 291.259,
-    "l1_length_mm": 250.003,
-    "l2_length_mm": 41.256,
+    "total_length_mm": 290.207,
+    "l1_length_mm": 245.359,
+    "l2_length_mm": 44.848,
     "via_count": 6,
     "edge_clearance_min_mm": 3.68,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 216.886
+    "aggregate": 219.952
   },
   "invariants": [
     {
       "key": "angles_45_or_90",
-      "label": "45\u00b0/axis-aligned segments only",
+      "label": "45\u00b0/axis-aligned segments, no acute turns",
       "passed": true,
-      "message": "all segments cardinal or exact-45\u00b0"
+      "message": "all segments cardinal/45\u00b0 with no acute turns"
     },
     {
       "key": "edge_clearance",
@@ -182,7 +182,7 @@
       "source": "via",
       "ref": "primary_SDA_scd41",
       "role": "via",
-      "x": -12.7,
+      "x": -15.24,
       "y": -7.62,
       "diameter": 1.25
     },
@@ -191,7 +191,7 @@
       "ref": "primary_SDA_scd41",
       "role": "via",
       "x": -5.08,
-      "y": 0.0,
+      "y": 2.54,
       "diameter": 1.25
     }
   ]

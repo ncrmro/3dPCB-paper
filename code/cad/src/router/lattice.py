@@ -256,29 +256,56 @@ def _lattice_astar(
     open_heap: list[
         tuple[float, float, tuple[int, int, int], tuple[int, int, int] | None]
     ] = []
-    g_cost: dict[tuple[int, int, int], float] = {}
-    parents: dict[tuple[int, int, int], tuple[int, int, int] | None] = {}
+    # The search state is (node, prev_step), not just the node. prev_step is
+    # the move token that arrived at the node — planar (0, dy, dx), via
+    # (±1, 0, 0), or None at a start — and it drives two things: the bend
+    # penalty (any direction change) AND the turn restriction below. Keying on
+    # it stops the search collapsing two arrivals that reach the same node from
+    # different directions, which is what makes the turn restriction sound: a
+    # node entered going NE may legally exit S only via an arrival the
+    # node-only search would have discarded.
+    State = tuple[tuple[int, int, int], tuple[int, int, int] | None]
+    g_cost: dict[State, float] = {}
+    parents: dict[State, State | None] = {}
     for s in starts:
-        g_cost[s] = 0.0
-        parents[s] = None
+        g_cost[(s, None)] = 0.0
+        parents[(s, None)] = None
         h = min(_octile(s, goal) for goal in goals)
         heapq.heappush(open_heap, (h, 0.0, s, None))
 
     while open_heap:
-        _f, gc, cur, prev_dir = heapq.heappop(open_heap)
+        _f, gc, cur, prev_step = heapq.heappop(open_heap)
+        state: State = (cur, prev_step)
         if cur in goals:
             path = [cur]
-            while parents[path[-1]] is not None:
-                path.append(parents[path[-1]])  # type: ignore[arg-type]
+            st = parents[state]
+            while st is not None:
+                path.append(st[0])
+                st = parents[st]
             path.reverse()
             return path
-        if gc > g_cost.get(cur, math.inf):
+        if gc > g_cost.get(state, math.inf):
             continue
         layer, ix, iy = cur
         cur_world = geom.world(ix, iy)
         cur_perp = dense_axis.get((ix, iy))
+        # Incoming planar direction, or None at a start / just after a via —
+        # both leave the next planar move's direction unconstrained.
+        din = (
+            (prev_step[2], prev_step[1])
+            if prev_step is not None and prev_step[0] == 0
+            else None
+        )
 
         for dx, dy in _PLANAR_MOVES:
+            # Turn restriction: never bend more than 90° between consecutive
+            # planar runs. A >90° direction change makes an acute (< 90°)
+            # interior corner — a sub-45° spike that can't be printed as a
+            # channel. All lattice steps have components in {-1, 0, 1}, so the
+            # sign of the dot product alone separates a ≤90° turn (≥ 0) from a
+            # 135°/180° one (< 0).
+            if din is not None and din[0] * dx + din[1] * dy < 0:
+                continue
             nix, niy = ix + dx, iy + dy
             if not geom.in_bounds(nix, niy):
                 continue
@@ -301,12 +328,13 @@ def _lattice_astar(
             step = base * _W_STEP * layer_step_mul[layer]
             step += _edge_penalty(geom.g, nix * geom.n, niy * geom.n)
             step_dir = (0, dy, dx)
-            if prev_dir is not None and prev_dir != step_dir:
+            if prev_step is not None and prev_step != step_dir:
                 step += _W_BEND
             new_g = gc + step
-            if new_g < g_cost.get(nbr, math.inf):
-                g_cost[nbr] = new_g
-                parents[nbr] = cur
+            nstate: State = (nbr, step_dir)
+            if new_g < g_cost.get(nstate, math.inf):
+                g_cost[nstate] = new_g
+                parents[nstate] = state
                 h = min(_octile(nbr, goal) for goal in goals)
                 heapq.heappush(open_heap, (new_g + h, new_g, nbr, step_dir))
 
@@ -315,12 +343,13 @@ def _lattice_astar(
         if oracle.via_clear(cur_world, net_id, own_pins):
             step = _W_VIA
             step_dir = (other - layer, 0, 0)
-            if prev_dir is not None and prev_dir != step_dir:
+            if prev_step is not None and prev_step != step_dir:
                 step += _W_BEND
             new_g = gc + step
-            if new_g < g_cost.get(nbr, math.inf):
-                g_cost[nbr] = new_g
-                parents[nbr] = cur
+            nstate = (nbr, step_dir)
+            if new_g < g_cost.get(nstate, math.inf):
+                g_cost[nstate] = new_g
+                parents[nstate] = state
                 h = min(_octile(nbr, goal) for goal in goals)
                 heapq.heappush(open_heap, (new_g + h, new_g, nbr, step_dir))
 
