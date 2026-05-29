@@ -3,17 +3,18 @@ name: i2c_midline_no_oled
 # Quick-print I²C substrate WITHOUT the OLED: just the ESP32-C3 master
 # and the SCD41 + BH1750 sensors on the bus.
 #
-# Layout note: the devices are spread across a 78×50 plate so the four
-# I²C nets route at the GENEROUS default buffer (1.0 mm) — i.e. every
-# wire channel keeps a full 1.0 mm wall to the next channel AND to each
-# sensor recess. Cramming the devices closer chokes the pin-approach
-# corridors and forces the buffer down (thin, unprintable recess walls),
-# so the plate is sized to the routing, not the other way round. No
-# `dim.buffer` override here: the default IS the target.
+# Layout note: the devices keep a generous spread so the four I²C nets
+# route at the GENEROUS default buffer (1.0 mm) — i.e. every wire channel
+# keeps a full 1.0 mm wall to the next channel AND to each sensor recess.
+# Cramming the devices closer chokes the pin-approach corridors and forces
+# the buffer down (thin, unprintable recess walls), so spacing is sized to
+# the routing. The plate is then trimmed to the min-fit rectangle (routed
+# extent + edge clearance, snapped to pitch — see the report's `min_size`).
+# No `dim.buffer` override here: the default IS the target.
 
 levels:
   - name: base
-    perimeter: { cx: 0, cy: 0, w: 78, h: 50 }
+    perimeter: { center_x: -2.54, center_y: -1.27, width: 71.12, height: 38.1 }
     z_start: -1.5
     z_end: 1.5
 

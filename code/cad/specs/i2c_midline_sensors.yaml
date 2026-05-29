@@ -3,18 +3,20 @@ name: i2c_midline_sensors
 # Quick-print I²C substrate WITH the OLED: ESP32-C3 master + SCD41 +
 # BH1750 sensors + an SSD1306 OLED on a 4-pin female header.
 #
-# Same principle as i2c_midline_no_oled: the devices are spread across
-# a 98×68 plate so all four I²C nets route at the GENEROUS default
-# buffer (1.0 mm), keeping a full 1.0 mm wall between every channel,
-# every sensor recess AND across the OLED branch off the trunk. The
-# OLED's extra north branch crowds the SCL/SDA trunk, so this board
-# needs more spread than the no-OLED variant to stay fully clean (every
-# cross-net wall ≥ buffer, not just above the half-floor). No
-# `dim.buffer` override — the default is the target wall thickness.
+# Same principle as i2c_midline_no_oled: the devices keep a generous
+# spread so all four I²C nets route at the GENEROUS default buffer
+# (1.0 mm), keeping a full 1.0 mm wall between every channel, every
+# sensor recess AND across the OLED branch off the trunk. The OLED's
+# extra north branch crowds the SCL/SDA trunk, so this board needs more
+# device spread than the no-OLED variant to stay fully clean (every
+# cross-net wall ≥ buffer, not just above the half-floor). The plate is
+# then trimmed to the min-fit rectangle (routed extent + edge clearance,
+# snapped to pitch — see the report's `min_size`). No `dim.buffer`
+# override — the default is the target wall thickness.
 
 levels:
   - name: base
-    perimeter: { cx: 0, cy: 0, w: 98, h: 68 }
+    perimeter: { center_x: 2.54, center_y: -2.54, width: 81.28, height: 50.8 }
     z_start: -1.5
     z_end: 1.5
 

@@ -7,9 +7,19 @@
     "l1_length_mm": 245.359,
     "l2_length_mm": 44.848,
     "via_count": 6,
-    "edge_clearance_min_mm": 3.68,
+    "edge_clearance_min_mm": -1.4,
     "pedestal_underside_mm": 0.0,
-    "aggregate": 219.952
+    "aggregate": 269.952
+  },
+  "min_size": {
+    "width_mm": 71.12,
+    "height_mm": 38.1,
+    "center_x": -2.54,
+    "center_y": -1.27,
+    "current_width_mm": 71.12,
+    "current_height_mm": 38.1,
+    "slack_width_mm": 0.0,
+    "slack_height_mm": 0.0
   },
   "invariants": [
     {
@@ -22,7 +32,7 @@
       "key": "edge_clearance",
       "label": "Channels \u2265 edge_clearance from board outline",
       "passed": true,
-      "message": "min centreline \u2192 edge: 5.08 mm (threshold 0.40; in primary_VCC_scd41)"
+      "message": "min centreline \u2192 edge: 2.54 mm (threshold 0.40; in primary_VCC_scd41)"
     },
     {
       "key": "wall_floor",
