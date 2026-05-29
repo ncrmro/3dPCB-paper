@@ -48,10 +48,14 @@ class Grid:
         # the grid stays a subset of the board; the < res strip trimmed at
         # each edge already sits inside the edge-clearance keep-out, so no
         # routable area is lost.
-        x_min = math.ceil(perim.x_min / res) * res
-        y_min = math.ceil(perim.y_min / res) * res
-        x_max = math.floor(perim.x_max / res) * res
-        y_max = math.floor(perim.y_max / res) * res
+        # Nudge by an epsilon (sub-nm) before rounding so an edge already on
+        # the res lattice isn't inset a full cell by float error — e.g.
+        # -27.94 / 0.508 == -54.99999999999999, whose bare ceil() is -54.
+        eps = 1e-6
+        x_min = math.ceil(perim.x_min / res - eps) * res
+        y_min = math.ceil(perim.y_min / res - eps) * res
+        x_max = math.floor(perim.x_max / res + eps) * res
+        y_max = math.floor(perim.y_max / res + eps) * res
         g = cls(
             x_min=x_min, y_min=y_min,
             width=x_max - x_min, height=y_max - y_min,

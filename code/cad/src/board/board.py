@@ -184,10 +184,14 @@ class Board(BaseModel):
         pitch = self.dim.pitch or 2.54
         base = self.levels[0]
         p = base.perimeter
-        x_min = math.floor(p.x_min / pitch) * pitch
-        x_max = math.ceil(p.x_max / pitch) * pitch
-        y_min = math.floor(p.y_min / pitch) * pitch
-        y_max = math.ceil(p.y_max / pitch) * pitch
+        # Nudge by an epsilon (nm-scale) before rounding so an edge already on
+        # pitch isn't bumped a full pitch outward by float error — e.g.
+        # 33.02 / 2.54 == 13.000000000000002, whose bare ceil() is 14.
+        eps = 1e-6
+        x_min = math.floor(p.x_min / pitch + eps) * pitch
+        x_max = math.ceil(p.x_max / pitch - eps) * pitch
+        y_min = math.floor(p.y_min / pitch + eps) * pitch
+        y_max = math.ceil(p.y_max / pitch - eps) * pitch
         if (abs(x_min - p.x_min) < 1e-9 and abs(x_max - p.x_max) < 1e-9
                 and abs(y_min - p.y_min) < 1e-9 and abs(y_max - p.y_max) < 1e-9):
             return self
