@@ -352,6 +352,80 @@ def _hole_table(board: Board, paths, dims) -> list[dict]:
 # ---------------------------------------------------------------------------
 
 
+def _min_fit_perimeter(board: Board, paths, dims) -> dict:
+    """Smallest pitch-aligned perimeter that still contains everything that
+    loads the substrate, for the device layout as routed.
+
+    Bounds the union of: each flat-mounted device's footprint, each
+    header's connector-body footprint (the elevated/cantilevered part —
+    e.g. an OLED display on its pedestal — floats and needs no material
+    under it), every routed channel inflated by its `channel_width/2 +
+    buffer` half-width, and every via by its halo. The union is then grown
+    by `edge_clearance` on each side and snapped outward to the pitch so the
+    grid origin stays pitch-anchored.
+
+    Reported as guidance: the perimeter is hand-set in the spec, so this is
+    a floor the user can resize down to (and then re-route to confirm), not
+    an automatic shrink. The route is computed on the current (larger)
+    plate, so a tighter plate must be re-verified.
+    """
+    pitch = dims.pitch
+    ec = dims.edge_clearance
+    chan_halo = dims.channel_width / 2 + dims.buffer
+    via_halo = dims.via_halo_mm
+
+    xs: list[float] = []
+    ys: list[float] = []
+    for inst in board.devices:
+        if inst.header is not None:
+            conn = inst.header.resolved_connector()
+            w, h = conn.body_width, conn.body_depth
+            cx, cy = inst.position.x, inst.position.y
+        else:
+            fp = inst.resolved_device().footprint
+            w, h = fp.w, fp.h
+            cx, cy = inst.position.x + fp.cx, inst.position.y + fp.cy
+        if inst.rotation not in (0, 180):
+            w, h = h, w
+        xs += [cx - w / 2, cx + w / 2]
+        ys += [cy - h / 2, cy + h / 2]
+    for path in paths:
+        for elt in path.elements:
+            if isinstance(elt, WireSegment):
+                xs += [elt.start.x - chan_halo, elt.start.x + chan_halo,
+                       elt.end.x - chan_halo, elt.end.x + chan_halo]
+                ys += [elt.start.y - chan_halo, elt.start.y + chan_halo,
+                       elt.end.y - chan_halo, elt.end.y + chan_halo]
+            elif isinstance(elt, Via):
+                xs += [elt.position.x - via_halo, elt.position.x + via_halo]
+                ys += [elt.position.y - via_halo, elt.position.y + via_halo]
+
+    base = board.levels[0].perimeter
+    if not xs:  # no devices and no routed copper — nothing to bound
+        return {
+            "width_mm": round(base.w, 3), "height_mm": round(base.h, 3),
+            "center_x": round(base.cx, 3), "center_y": round(base.cy, 3),
+            "current_width_mm": round(base.w, 3),
+            "current_height_mm": round(base.h, 3),
+            "slack_width_mm": 0.0, "slack_height_mm": 0.0,
+        }
+    x_min = math.floor((min(xs) - ec) / pitch) * pitch
+    x_max = math.ceil((max(xs) + ec) / pitch) * pitch
+    y_min = math.floor((min(ys) - ec) / pitch) * pitch
+    y_max = math.ceil((max(ys) + ec) / pitch) * pitch
+    w, h = x_max - x_min, y_max - y_min
+    return {
+        "width_mm": round(w, 3),
+        "height_mm": round(h, 3),
+        "center_x": round((x_min + x_max) / 2, 3),
+        "center_y": round((y_min + y_max) / 2, 3),
+        "current_width_mm": round(base.w, 3),
+        "current_height_mm": round(base.h, 3),
+        "slack_width_mm": round(base.w - w, 3),
+        "slack_height_mm": round(base.h - h, 3),
+    }
+
+
 def _build_report(spec_path: Path) -> dict:
     board = load_board(spec_path)
     dims = resolve_dims(board)
@@ -391,6 +465,7 @@ def _build_report(spec_path: Path) -> dict:
             "pedestal_underside_mm": round(score.pedestal_underside_mm, 3),
             "aggregate": round(score.aggregate, 3),
         },
+        "min_size": _min_fit_perimeter(board, paths, dims),
         "invariants": invariants,
         "holes": _hole_table(board, paths, dims),
     }

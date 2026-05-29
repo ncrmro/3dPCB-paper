@@ -51,11 +51,22 @@ interface ScoreBreakdown {
   pedestal_underside_mm: number;
   aggregate: number;
 }
+interface MinSize {
+  width_mm: number;
+  height_mm: number;
+  center_x: number;
+  center_y: number;
+  current_width_mm: number;
+  current_height_mm: number;
+  slack_width_mm: number;
+  slack_height_mm: number;
+}
 interface SubstrateReport {
   name: string;
   class: string;
   spec_path: string | null;
   score: ScoreBreakdown;
+  min_size?: MinSize;
   invariants: InvariantResult[];
   holes: HoleRow[];
 }
@@ -267,6 +278,17 @@ if (project === "cad") {
                 <dt>Aggregate score</dt><dd><strong>{report.score.aggregate.toFixed(1)}</strong> <span class="muted">(lower is better)</span></dd>
               </dl>
             </div>
+            {report.min_size && (
+              <div class="report-block">
+                <h3>Board size</h3>
+                <dl class="report-dl">
+                  <dt>Current</dt><dd>{report.min_size.current_width_mm.toFixed(2)} × {report.min_size.current_height_mm.toFixed(2)} mm</dd>
+                  <dt>Minimum fit</dt><dd><strong>{report.min_size.width_mm.toFixed(2)} × {report.min_size.height_mm.toFixed(2)} mm</strong></dd>
+                  <dt>Slack</dt><dd>{report.min_size.slack_width_mm.toFixed(2)} mm wide, {report.min_size.slack_height_mm.toFixed(2)} mm tall</dd>
+                  <dt>Min perimeter</dt><dd class="muted">center_x {report.min_size.center_x.toFixed(2)}, center_y {report.min_size.center_y.toFixed(2)}, width {report.min_size.width_mm.toFixed(2)}, height {report.min_size.height_mm.toFixed(2)}</dd>
+                </dl>
+              </div>
+            )}
             <div class="report-block">
               <h3>Routing invariants</h3>
               <ul class="report-invariants">
