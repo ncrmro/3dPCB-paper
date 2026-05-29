@@ -1,15 +1,10 @@
 """Routing grid + static-blocker population.
 
 `Grid` is a 2-layer, fixed-resolution discretisation of the board's base
-perimeter. `_build_grid` populates it with the immutable blockers a route
-must respect: edge-clearance strips, device pockets, and per-pin
-"approach corridors" that keep each pin reachable by its owning net even
-after surrounding cells get crowded.
-
-Dynamic attributes (`_pin_approach_cells`, `_pin_approach_by_pin`,
-`_pin_buffer_by_pin`) are stashed on the Grid by `_build_grid` and read
-by the A* core + the post-route blocker. Lifting them into proper
-dataclass fields is a follow-up.
+perimeter. `_build_grid` populates `g.blocked` with the immutable blockers
+a route must respect — the edge-clearance strip and each flat-mounted
+device's L2 pocket footprint — and returns the device pin-hole cells the
+lattice oracle (`router.lattice`) uses for foreign-pin clearance.
 """
 
 from __future__ import annotations
@@ -27,25 +22,6 @@ from board.devices import Rect
 # breadboard grid. This constant is only the default for direct `Grid`
 # construction (tests / synthetic grids).
 GRID_RES_MM = 0.5
-
-# Per-pin "approach corridor" depth in grid cells. The owning net is
-# always allowed to step on these cells (so a pin remains reachable
-# even after neighbouring halos crowd in); other nets are excluded.
-# Pin pitch on STEMMA QT sensors is 2.54 mm = 5 grid cells at the default
-# 0.508 mm resolution (pitch/5), so a 3-cell corridor leaves 2 cells of
-# slack between adjacent pins' corridors — enough for the wall floor not to
-# collapse at the pin row.
-APPROACH_DEPTH = 3
-
-# Parallel-axis reserve at a dense-cluster pin: how many cells along the
-# row direction get added to the owning net's approach (so cross-nets
-# can't sit that close). ±1 keeps cross-net wires at 1.0 mm — below the
-# 1.4 mm wall_floor. ±2 keeps them at ≥ 1.5 mm, satisfying wall_floor
-# while still permitting routability at the 5-cell pin pitch (own
-# parallel reserves of adjacent pins fill the gap exactly with no
-# overlap; cross-net wires must leave the row before crossing the pin
-# pitch midpoint).
-DENSE_PIN_PARALLEL_RESERVE = 2
 
 
 @dataclass
@@ -187,10 +163,11 @@ def _dense_cluster_pin_axes(board: Board) -> dict[tuple[float, float], tuple[int
 def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     """Prepare the routing grid with all static blockers in place.
 
-    Returns (grid, pin_cells) where pin_cells is the set of cells that
-    represent device pin holes — A* may *enter* these cells but they
-    don't act as obstacles for the net that targets them. Other nets
-    treat them as blocked.
+    Returns (grid, pin_cells). `g.blocked` carries the immutable static
+    blockers — the edge-clearance strip and each flat-mounted device's L2
+    pocket footprint. `pin_cells` is every device pin hole: the lattice
+    oracle lets a net terminate on its own pin but treats every pin as an
+    obstacle to other nets.
     """
     g = Grid.from_board(board, res=dims.res)
 
@@ -215,51 +192,24 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
         inflate=0, layers=(0, 1),
     )
 
-    # Pin-hole cells — they're "soft" blockers (route endpoints land on
-    # them) so we don't pre-block them here, but we record them so the
-    # router knows which cells are valid termini. We also reserve a
-    # one-cell halo around each pin as a "pin approach corridor" — the
-    # path-blocking logic below skips these cells so a pin always
-    # remains reachable from at least one cardinal direction even after
-    # adjacent nets have routed through nearby cells. The approach also
-    # protects pin reachability from pocket blocking below.
-    # Pin cells + per-pin 1-cell approach corridors.
-    #
-    # Approach corridor depth tradeoff: deeper corridors keep pins
-    # reachable when prior nets' halos crowd in, but if two adjacent
-    # pins' corridors OVERLAP, two cross-net wires can route through
-    # the overlap and the wall floor between them collapses to 0.5 mm.
-    #
-    # SCD41/BH1750 pin pitch is 2.54 mm = 5 grid cells at the default
-    # 0.508 mm resolution (pitch/5). A 1-cell cardinal corridor (pin ±1 in x and y) means
-    # adjacent pins' corridors sit 2 cells apart — no overlap, no
-    # wall-floor collapse, and each pin keeps at least one free
-    # approach cell on each layer for A* to step from.
-    dense_axes = _dense_cluster_pin_axes(board)
-    bus_endpoint_xys: set[tuple[float, float]] = set()
-    for net in board.nets():
-        for ep in net.endpoints:
-            bus_endpoint_xys.add(
-                (round(ep.position.x, 3), round(ep.position.y, 3))
-            )
+    # Pin-hole cells on both layers. These stay routable (a net ends on its
+    # own pin) but the lattice oracle blocks every other net from them.
+    pin_cells: set[tuple[int, int, int]] = set()
+    for inst in board.devices:
+        device = inst.resolved_device()
+        for pin in device.pins:
+            abs_pos = device.pin_position_at(inst.position, inst.rotation, pin)
+            gx, gy = g.to_grid(abs_pos.x, abs_pos.y)
+            if not g.in_bounds(gx, gy):
+                continue
+            pin_cells.add((0, gy, gx))
+            pin_cells.add((1, gy, gx))
 
-    # Pre-compute the L2-pocket forbidden footprint for each
-    # flat-mounted device. A flat-mounted device (no header) has its
-    # pocket carved into the top face of the substrate, removing L2
-    # there. We forbid L2 routing inside the carved pocket *plus*
-    # `channel_width/2` of margin so the wire EDGE (centreline +
-    # channel_width/2) doesn't cross into the pocket. (Adding a full
-    # min_wall_thickness wall on top would be ideal but breaks
-    # routability on tight boards — defer to a board-spec knob if a
-    # specific design needs more wall.)
-    #
-    # Pin approach corridors must NOT extend into this forbidden
-    # region on L2 — a wire there would either float in air (in the
-    # pocket) or partially overhang it (in the margin). On L1 the
-    # substrate is intact, so the wire approaches from underneath via
-    # a via.
+    # Device pockets — a flat-mounted device's pocket cuts away the top
+    # face, so L2 channels can't pass through its footprint (+ margin). L1
+    # stays clear (the substrate floor is intact). The pin cell itself
+    # stays routable as a via target.
     pocket_margin = dims.pocket_margin_mm
-    pocket_by_device: dict[str, Rect] = {}
     for inst in board.devices:
         if inst.header is not None:
             continue
@@ -269,158 +219,12 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
             w, h = fp.w, fp.h
         else:
             w, h = fp.h, fp.w
-        pocket_by_device[inst.name] = Rect(
+        pocket = Rect(
             cx=inst.position.x + fp.cx,
             cy=inst.position.y + fp.cy,
             w=w + 2 * pocket_margin,
             h=h + 2 * pocket_margin,
         )
-
-    pin_cells: set[tuple[int, int, int]] = set()
-    pin_approach_by_pin: dict[
-        tuple[float, float], set[tuple[int, int, int]]
-    ] = {}
-    pin_buffer_by_pin: dict[
-        tuple[float, float], set[tuple[int, int, int]]
-    ] = {}
-    for inst in board.devices:
-        device = inst.resolved_device()
-        own_pocket = pocket_by_device.get(inst.name)
-        for pin in device.pins:
-            abs_pos = device.pin_position_at(inst.position, inst.rotation, pin)
-            gx, gy = g.to_grid(abs_pos.x, abs_pos.y)
-            if not g.in_bounds(gx, gy):
-                continue
-            key = (round(abs_pos.x, 3), round(abs_pos.y, 3))
-            for ly in (0, 1):
-                pin_cells.add((ly, gy, gx))
-            if key not in bus_endpoint_xys:
-                continue   # unrouted pin — drilled hole only, no corridor
-
-            dense_axis = dense_axes.get(key)
-            if dense_axis is not None:
-                perp_dx, perp_dy = dense_axis
-                axes = ((perp_dx, perp_dy), (-perp_dx, -perp_dy))
-            else:
-                axes = ((-1, 0), (1, 0), (0, -1), (0, 1))
-            approach: set[tuple[int, int, int]] = set()
-            for ly in (0, 1):
-                for ddx, ddy in axes:
-                    for k in range(1, APPROACH_DEPTH + 1):
-                        nx, ny = gx + ddx * k, gy + ddy * k
-                        if not g.in_bounds(nx, ny):
-                            continue
-                        # L2 approach can't extend into our own pocket:
-                        # the substrate is carved away there, so a wire
-                        # on L2 would have nothing to sit on. Force the
-                        # approach to come via L1 instead (which the
-                        # via from L2 naturally provides at the pin).
-                        if ly == 1 and own_pocket is not None:
-                            wx, wy = g.to_world(nx, ny)
-                            if (own_pocket.x_min <= wx <= own_pocket.x_max
-                                    and own_pocket.y_min <= wy <= own_pocket.y_max):
-                                continue
-                        approach.add((ly, ny, nx))
-            # For dense pins also reserve parallel-axis neighbours as
-            # part of the owning net's approach — own net can traverse
-            # them, but other nets' `extra_blocked` includes them so a
-            # cross-net wire can't sit close along the row (where halo
-            # doesn't reach because of the own_pin_cells exemption).
-            # Depth `DENSE_PIN_PARALLEL_RESERVE` controls the
-            # wall-floor distance along the row.
-            if dense_axis is not None:
-                par_dx, par_dy = perp_dy, perp_dx
-                for ly in (0, 1):
-                    for s in (-1, 1):
-                        for k in range(1, DENSE_PIN_PARALLEL_RESERVE + 1):
-                            nx, ny = gx + s * k * par_dx, gy + s * k * par_dy
-                            if g.in_bounds(nx, ny):
-                                approach.add((ly, ny, nx))
-                # Diagonal "buffer" cells around the dense pin go into
-                # `other_net_buffer_by_pin` (consumed via
-                # `extra_blocked` in `_route_one_net`). Own net is not
-                # given access — these are pure exclusion for cross-net
-                # wires that would otherwise sit diagonally adjacent to
-                # the pin.
-                buffer: set[tuple[int, int, int]] = set()
-                for ly in (0, 1):
-                    for ddx in (-1, 0, 1):
-                        for ddy in (-1, 0, 1):
-                            if ddx == 0 and ddy == 0:
-                                continue
-                            nx, ny = gx + ddx, gy + ddy
-                            if g.in_bounds(nx, ny):
-                                buffer.add((ly, ny, nx))
-                # Remove cells that are already in approach (own can
-                # step there) — the buffer adds the diagonals only.
-                buffer -= approach
-                pin_buffer_by_pin.setdefault(key, set()).update(buffer)
-            pin_approach_by_pin[key] = approach
-    g._pin_approach_cells = {c for s in pin_approach_by_pin.values() for c in s}
-    g._pin_approach_by_pin = pin_approach_by_pin
-    g._pin_buffer_by_pin = pin_buffer_by_pin
-
-    # No-turn exclusion zones around drilled holes. A routed channel must
-    # run STRAIGHT out of a via/pin until it clears the hole's buffer
-    # exclusion zone plus half a channel width, before a 90° bend is
-    # allowed — so a turn is never stacked on top of a hole and stays
-    # padded from it by a full `buffer`. The radius scales with `buffer`,
-    # like every other clearance. A* forbids planar bends in these cells
-    # (see `_astar`); the straight lead-out keeps the geometry clean and
-    # avoids the "stub-then-turn right on the hole" artifact.
-    # Radius = the hole's buffer exclusion zone (`hole_bore/2 + buffer`).
-    # The fuller "+ channel_width" the rule implies overruns the tighter
-    # boards' pin-approach corridors; the exclusion zone alone already
-    # lifts every turn off the hole and pads it by ~a buffer.
-    turn_clear_mm = dims.hole_bore_mm / 2 + dims.buffer
-    turn_clear_cells = max(1, round(turn_clear_mm / g.res))
-    no_turn_cells: set[tuple[int, int, int]] = set()
-    no_turn_by_pin: dict[tuple[int, int], set[tuple[int, int, int]]] = {}
-    for inst in board.devices:
-        device = inst.resolved_device()
-        for pin in device.pins:
-            pos = device.pin_position_at(inst.position, inst.rotation, pin)
-            if (round(pos.x, 3), round(pos.y, 3)) not in bus_endpoint_xys:
-                continue
-            cgx, cgy = g.to_grid(pos.x, pos.y)
-            zone: set[tuple[int, int, int]] = set()
-            for dgy in range(-turn_clear_cells, turn_clear_cells + 1):
-                for dgx in range(-turn_clear_cells, turn_clear_cells + 1):
-                    if dgx * dgx + dgy * dgy > turn_clear_cells * turn_clear_cells:
-                        continue
-                    nx, ny = cgx + dgx, cgy + dgy
-                    if g.in_bounds(nx, ny):
-                        zone.add((0, ny, nx))
-                        zone.add((1, ny, nx))
-            no_turn_by_pin[(cgx, cgy)] = zone
-            no_turn_cells |= zone
-    g._no_turn_cells = no_turn_cells
-    # Per-pin zones so the router can exempt the pin a wire is currently
-    # routing TO (the approach turn must be allowed), while keeping the
-    # exit-turn ban at the start pin and every other hole.
-    g._no_turn_by_pin = no_turn_by_pin
-
-    # Hard blockers — cells the post-route collapse must NEVER step on,
-    # even when they sit inside the path's own exclusive halo. These
-    # are physical impossibilities (no substrate, or board edge), not
-    # neighbour-wire halos. Populated below as pockets + edge strips
-    # get blocked.
-    hard_blocked: set[tuple[int, int, int]] = set()
-    for ly in (0, 1):
-        for gy in range(g.ny):
-            for gx in range(g.nx):
-                if g.blocked[ly][gy][gx]:
-                    hard_blocked.add((ly, gy, gx))
-
-    # Device pockets — for flat-mounted devices, the pocket cuts away
-    # the top face of the substrate, so L2 (top) channels can't pass
-    # through the pocket xy. L1 stays clear (the substrate floor is
-    # intact under flat-mounted devices). The pin cell itself remains
-    # exempt as a routing target; the approach corridor was already
-    # pruned of pocket-interior cells above, so a wire targeting the
-    # pin on L2 must arrive via a via from L1.
-    for name, pocket in pocket_by_device.items():
-        del name  # iteration target only; the pocket Rect is what we use
         gx_lo, gy_lo = g.to_grid(pocket.x_min, pocket.y_min)
         gx_hi, gy_hi = g.to_grid(pocket.x_max, pocket.y_max)
         for gy in range(max(gy_lo, 0), min(gy_hi + 1, g.ny)):
@@ -428,7 +232,5 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
                 if (1, gy, gx) in pin_cells:
                     continue
                 g.blocked[1][gy][gx] = True
-                hard_blocked.add((1, gy, gx))
 
-    g._hard_blocked = hard_blocked
     return g, pin_cells

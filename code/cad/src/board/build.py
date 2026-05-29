@@ -69,7 +69,6 @@ class ResolvedDims:
     pitch_subdivisions: float
     lead_in_depth: float
     thickness: float  # base-plate thickness, derived from the base level
-    router_engine: str  # "voxel" | "lattice"; selects the autorouter
 
     # ---- derived clearances (single source of truth) ------------------
     # Each accessor is the ONLY definition of a formula that was previously
@@ -132,7 +131,6 @@ def resolve_dims(board: Board) -> ResolvedDims:
         merged["via_diameter"] = merged["hole_diameter"]
     return ResolvedDims(
         thickness=base.thickness,
-        router_engine=board.dim.router_engine or "lattice",
         **merged,
     )
 

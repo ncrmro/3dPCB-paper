@@ -11,11 +11,6 @@ name: i2c_midline_no_oled
 # so the plate is sized to the routing, not the other way round. No
 # `dim.buffer` override here: the default IS the target.
 
-# Route on the breadboard lattice so runs/corners/vias land on-pitch by
-# construction. Lattice is the global default; pinned here explicitly.
-dim:
-  router_engine: lattice
-
 levels:
   - name: base
     perimeter: { cx: 0, cy: 0, w: 78, h: 50 }

@@ -12,11 +12,6 @@ name: i2c_midline_sensors
 # cross-net wall ≥ buffer, not just above the half-floor). No
 # `dim.buffer` override — the default is the target wall thickness.
 
-# Route on the breadboard lattice so runs/corners/vias land on-pitch by
-# construction. Lattice is the global default; pinned here explicitly.
-dim:
-  router_engine: lattice
-
 levels:
   - name: base
     perimeter: { cx: 0, cy: 0, w: 98, h: 68 }
