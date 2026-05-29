@@ -23,6 +23,7 @@ from __future__ import annotations
 
 import heapq
 import math
+from collections import deque
 from collections.abc import Iterator
 
 from board.board import Board
@@ -420,6 +421,11 @@ def _route_one_net_lattice(
                 dense_axis=dense_axis, forbidden_nodes=forbidden_nodes,
             )
             if seg is None:
+                # CRITICAL: drop this net's already-committed legs before
+                # raising. The coordinator retries nets in other orders / after
+                # rip-up, and a half-committed net would poison the oracle —
+                # its stale halo would block the very rerouting meant to fix it.
+                _rollback_net(oracle, net_id)
                 raise RouteFailure(
                     net, f"lattice: no route to {slave.instance_name}", (),
                 )
@@ -444,26 +450,169 @@ def _route_one_net_lattice(
     return out
 
 
-def _lattice_bus_order(
-    actions: list[tuple[Net, str | None]],
-) -> list[tuple[Net, str | None]]:
-    """TEMP (Stage A): the greedy lattice router is order-sensitive at fan-outs —
-    the last net into a tight cluster gets boxed in by earlier nets' halos.
-    `_ordered_bus_actions` emits the second-of-pair nets in pair declaration
-    order (…GND, then SDA); routing the harder signal (SDA) before power (GND)
-    yields the one ordering empirically validated to route both production
-    boards (SCL, VCC, SDA, GND). Sort just the second-of-pair block (the entries
-    carrying a parallel-target) by `_net_priority`; leave first-of-pair and
-    leftover positions untouched. Replaced by the order-search coordinator in
-    Stage B."""
-    second_slots = [i for i, (_n, target) in enumerate(actions) if target is not None]
-    if len(second_slots) <= 1:
-        return actions
-    ranked = sorted((actions[i] for i in second_slots), key=lambda a: _net_priority(a[0]))
-    out = list(actions)
-    for slot, entry in zip(second_slots, ranked, strict=True):
-        out[slot] = entry
+def _rollback_net(oracle: LatticeOracle, net_id: int) -> None:
+    """Delete every committed owner cell belonging to `net_id`, restoring the
+    oracle to its pre-routing state for that net. Lets the coordinator undo a
+    backtracked, failed, or ripped net without touching any other net's copper."""
+    dead = [cell for cell, owner in oracle.owner.items() if owner == net_id]
+    for cell in dead:
+        del oracle.owner[cell]
+
+
+def _seed_order(actions: list[tuple[Net, str | None]]) -> list[Net]:
+    """Heuristic net order that seeds the search. Takes the scheduler's actions
+    and sorts the second-of-pair nets by priority (route the harder signal of
+    each pair — SDA — ahead of the forgiving one — GND). This is the order
+    empirically validated to route both production boards in a single pass;
+    `_route_bus` explores from it first and only deviates when a board needs a
+    different order, so the common case stays on the known-good routing while
+    the search adds robustness for boards the seed doesn't satisfy."""
+    second_slots = [i for i, (_net, target) in enumerate(actions) if target is not None]
+    out = [net for net, _target in actions]
+    if len(second_slots) > 1:
+        ranked = sorted((actions[i][0] for i in second_slots), key=_net_priority)
+        for slot, net in zip(second_slots, ranked, strict=True):
+            out[slot] = net
     return out
+
+
+def _dfs_order(
+    geom: LatticeGeom,
+    oracle: LatticeOracle,
+    nets: list[Net],
+    ids: list[int],
+    remaining: frozenset[int],
+    dense_axis: dict[tuple[int, int], tuple[int, int]] | None,
+    approach_reserved: dict[tuple[int, int], set[tuple[int, int]]] | None,
+) -> list[SignalPath] | None:
+    """Find a net order that routes every net of the bus, by depth-first search
+    over orderings with first-failure pruning. At each level try the remaining
+    nets in seed order (ascending canonical index); commit the chosen net,
+    recurse, and on a dead end roll it back and try the next. The first complete
+    branch wins, so a net that boxes in a later one is simply never the prefix
+    of a solution. Because `nets` is pre-sorted into the seed order, the search
+    reproduces the seed routing whenever it works and is otherwise independent
+    of the scheduler's emission order. Returns the routed paths in commit order,
+    or None if no order routes the whole bus.
+
+    `remaining` holds canonical indices into `nets`/`ids`; each net keeps a fixed
+    id across attempts so `_rollback_net` cleanly removes exactly its copper."""
+    if not remaining:
+        return []
+    for idx in sorted(remaining):
+        try:
+            legs = _route_one_net_lattice(
+                geom, oracle, nets[idx], ids[idx], dense_axis, approach_reserved,
+            )
+        except RouteFailure:
+            continue  # net unroutable on this prefix; its partial legs self-cleaned
+        rest = _dfs_order(
+            geom, oracle, nets, ids, remaining - {idx}, dense_axis, approach_reserved,
+        )
+        if rest is not None:
+            return legs + rest
+        _rollback_net(oracle, ids[idx])  # backtrack: this prefix has no completion
+    return None
+
+
+def _blockers_around(
+    geom: LatticeGeom, oracle: LatticeOracle, net: Net,
+) -> set[int]:
+    """Net ids whose committed copper sits on the lattice cells immediately
+    around this net's endpoints — i.e. the foreign nets sealing off its escape
+    edges. These are the rip-up candidates: removing them reopens the fan-out."""
+    blockers: set[int] = set()
+    for ep in net.endpoints:
+        ix, iy = geom.node_of_pin(ep.position.x, ep.position.y)
+        for dx, dy in _PLANAR_MOVES:
+            nix, niy = ix + dx, iy + dy
+            if not geom.in_bounds(nix, niy):
+                continue
+            wa, wb = geom.world(ix, iy), geom.world(nix, niy)
+            for layer in (0, 1):
+                for cell in _segment_cells(oracle.g, wa, wb, layer, 0.0):
+                    owner = oracle.owner.get(cell)
+                    if owner is not None:
+                        blockers.add(owner)
+    return blockers
+
+
+# Per-net cap on how many times a single net may trigger a rip-up before the
+# bus is declared unroutable — bounds the rip-and-reroute loop so it always
+# terminates (at most _RIP_BUDGET * n_nets rip events).
+_RIP_BUDGET = 3
+
+
+def _ripup_route_bus(
+    geom: LatticeGeom,
+    oracle: LatticeOracle,
+    nets: list[Net],
+    ids: list[int],
+    dense_axis: dict[tuple[int, int], tuple[int, int]] | None,
+    approach_reserved: dict[tuple[int, int], set[tuple[int, int]]] | None,
+) -> list[SignalPath]:
+    """Rip-up-and-reroute fallback for buses where no single net order routes
+    every net (a mutual block that reordering alone can't resolve). Route nets
+    in priority order; when one fails, rip the committed nets fencing its escape
+    edges, route the failed net first, then re-queue the ripped nets. A per-net
+    rip budget guarantees termination; exhausting it raises `RouteFailure`."""
+    paths_by_idx: dict[int, list[SignalPath]] = {}
+    rip_count = [0] * len(nets)
+    work: deque[int] = deque(range(len(nets)))  # seed order (ascending index)
+    while work:
+        idx = work.popleft()
+        if idx in paths_by_idx:
+            continue
+        try:
+            paths_by_idx[idx] = _route_one_net_lattice(
+                geom, oracle, nets[idx], ids[idx], dense_axis, approach_reserved,
+            )
+            continue
+        except RouteFailure:
+            pass  # partial legs already rolled back; now make room by ripping
+        blocker_ids = _blockers_around(geom, oracle, nets[idx]) - {ids[idx]}
+        rippable = sorted(i for i in paths_by_idx if ids[i] in blocker_ids)
+        if not rippable or rip_count[idx] >= _RIP_BUDGET:
+            raise RouteFailure(
+                nets[idx],
+                f"lattice: no working order and rip-up exhausted for {nets[idx].signal}",
+                tuple(p for legs in paths_by_idx.values() for p in legs),
+            )
+        rip_count[idx] += 1
+        for i in rippable:
+            _rollback_net(oracle, ids[i])
+            del paths_by_idx[i]
+        # Route the blocked net first now its escape is clear, then the ripped.
+        for i in reversed(rippable):
+            work.appendleft(i)
+        work.appendleft(idx)
+    return [p for idx in sorted(paths_by_idx) for p in paths_by_idx[idx]]
+
+
+def _route_bus(
+    geom: LatticeGeom,
+    oracle: LatticeOracle,
+    nets: list[Net],
+    base_net_id: int,
+    dense_axis: dict[tuple[int, int], tuple[int, int]] | None,
+    approach_reserved: dict[tuple[int, int], set[tuple[int, int]]] | None,
+) -> tuple[list[SignalPath], int]:
+    """Route every net of one bus, independent of the order the scheduler hands
+    them in. Try order-search first (it routes both production boards); fall
+    back to rip-up only if no order completes. Each net gets a fixed bus-scoped
+    id (`base_net_id+1 …`) so rollbacks are exact. Returns the bus's paths plus
+    the next free net id for the following bus."""
+    next_id = base_net_id + len(nets)
+    if not nets:
+        return [], next_id
+    ids = [base_net_id + 1 + i for i in range(len(nets))]
+    paths = _dfs_order(
+        geom, oracle, nets, ids, frozenset(range(len(nets))),
+        dense_axis, approach_reserved,
+    )
+    if paths is None:
+        paths = _ripup_route_bus(geom, oracle, nets, ids, dense_axis, approach_reserved)
+    return paths, next_id
 
 
 def route_board(board: Board, dims) -> list[SignalPath]:
@@ -493,14 +642,16 @@ def route_board(board: Board, dims) -> list[SignalPath]:
     net_id = 0
     for bus in board.buses:
         nets_by_signal = {n.signal: n for n in resolve_bus(bus, bound)}
-        actions = _lattice_bus_order(_ordered_bus_actions(bus.kind, nets_by_signal))
-        for net, _target_sig in actions:
-            net_id += 1
-            try:
-                paths.extend(_route_one_net_lattice(
-                    geom, oracle, net, net_id, dense_axis, approach_reserved,
-                ))
-            except RouteFailure as exc:
-                exc.partial = tuple(paths)
-                raise
+        # `_seed_order` is the priority + pair-bundling heuristic; `_route_bus`
+        # explores from it and finds an order that actually routes, so the
+        # result no longer depends on the scheduler getting it right.
+        nets = _seed_order(_ordered_bus_actions(bus.kind, nets_by_signal))
+        try:
+            bus_paths, net_id = _route_bus(
+                geom, oracle, nets, net_id, dense_axis, approach_reserved,
+            )
+        except RouteFailure as exc:
+            exc.partial = tuple(paths) + tuple(exc.partial or ())
+            raise
+        paths.extend(bus_paths)
     return paths
