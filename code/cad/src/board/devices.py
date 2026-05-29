@@ -16,7 +16,7 @@ a `Sensor` fails loudly rather than silently producing a half-wired net.
 
 from __future__ import annotations
 
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import AliasChoices, BaseModel, ConfigDict, Field
 
 from board.pins import Pin, Point2D
 
@@ -27,12 +27,15 @@ class Rect(BaseModel):
     Reused for device footprints, level perimeters, and connector bodies.
     """
 
-    model_config = ConfigDict(frozen=True)
+    # Accept spelled-out keys in YAML (center_x/center_y/width/height) while
+    # keeping the terse attribute names the code reads; populate_by_name lets
+    # Python keep constructing Rect(cx=…, w=…).
+    model_config = ConfigDict(frozen=True, populate_by_name=True)
 
-    cx: float
-    cy: float
-    w: float = Field(gt=0)
-    h: float = Field(gt=0)
+    cx: float = Field(validation_alias=AliasChoices("center_x", "cx"))
+    cy: float = Field(validation_alias=AliasChoices("center_y", "cy"))
+    w: float = Field(gt=0, validation_alias=AliasChoices("width", "w"))
+    h: float = Field(gt=0, validation_alias=AliasChoices("height", "h"))
 
     @property
     def x_min(self) -> float:
