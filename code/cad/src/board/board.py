@@ -76,9 +76,17 @@ class DimOverrides(BaseModel):
     edge_clearance: float | None = None
     pitch: float | None = None  # breadboard module (2.54 mm)
     pitch_subdivisions: float | None = None  # routing cells per pitch; res = pitch / this
+    # Which autorouter to use. None falls back to the global default in
+    # resolve_dims (voxel). The lattice engine routes on-pitch by construction.
+    router_engine: Literal["voxel", "lattice"] | None = None
 
     def applied(self) -> dict[str, float]:
-        return {k: v for k, v in self.model_dump().items() if v is not None}
+        # Only the numeric dimension knobs feed ResolvedDims' float fields;
+        # router_engine is threaded separately (it isn't a dimension).
+        return {
+            k: v for k, v in self.model_dump().items()
+            if v is not None and k != "router_engine"
+        }
 
 
 class DeviceInstance(BaseModel):

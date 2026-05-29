@@ -7,8 +7,22 @@ search are exercised in isolation. Node `(layer, ix, iy)` sits on fine cell
 
 from __future__ import annotations
 
+from pathlib import Path
+
+import pytest
+
+from board.build import resolve_dims
+from board.cli_report import _run_invariants
+from board.loader import load_board
+from router import lattice
 from router.grid import Grid
 from router.lattice import LatticeGeom, LatticeOracle, _lattice_astar
+
+_SPECS = sorted((Path(__file__).resolve().parent.parent / "specs").glob("*.yaml"))
+_HARD_GATES = {
+    "angles_45_or_90", "edge_clearance", "wall_floor",
+    "drilled_holes_match_vias", "endpoints_connected",
+}
 
 PITCH = 2.54
 RES = PITCH / 5  # 0.508 mm — commensurate: 5 fine cells per pitch
@@ -117,3 +131,19 @@ def test_astar_vias_around_a_foreign_wall():
     assert path is not None
     used_via = any(path[i + 1][0] != path[i][0] for i in range(len(path) - 1))
     assert used_via, "should dive to the other layer to cross the foreign wall"
+
+
+@pytest.mark.parametrize("spec", _SPECS, ids=[p.stem for p in _SPECS])
+def test_lattice_routes_production_boards(spec):
+    """The lattice router routes every production board end-to-end and its
+    output passes every hard clearance gate (the same invariants the report
+    uses). wall_floor_cross_layer is advisory and not asserted."""
+    board = load_board(spec)
+    dims = resolve_dims(board)
+    paths = lattice.route_board(board, dims)
+    assert paths, "lattice router returned no paths"
+    results = {inv["key"]: inv for inv in _run_invariants(board, paths, dims)}
+    for key in _HARD_GATES:
+        assert results[key]["passed"], (
+            f"{spec.stem}: {key} failed — {results[key]['message']}"
+        )

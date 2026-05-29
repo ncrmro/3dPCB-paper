@@ -25,8 +25,14 @@ import heapq
 import math
 from collections.abc import Iterator
 
+from board.board import Board
+from board.buses import Net, resolve_bus
 from router.astar import _W_BEND, _W_STEP, _W_VIA, _edge_penalty
-from router.grid import Grid, _build_grid
+from router.autoroute import RouteFailure
+from router.grid import Grid, _build_grid, _dense_cluster_pin_axes
+from router.paths import Waypoint, waypoints_to_path
+from router.schedule import _net_priority, _ordered_bus_actions
+from vitamins.substrate import Point2D, SignalPath, Via, WireSegment
 
 _SQRT2 = math.sqrt(2.0)
 
@@ -217,6 +223,10 @@ def _octile(a: tuple[int, int, int], b: tuple[int, int, int]) -> float:
     return (max(dx, dy) + (_SQRT2 - 1) * min(dx, dy)) * _W_STEP + dl * _W_VIA
 
 
+def _perp_ok(axis: tuple[int, int]) -> frozenset[tuple[int, int]]:
+    return frozenset({axis, (-axis[0], -axis[1])})
+
+
 def _lattice_astar(
     geom: LatticeGeom,
     oracle: LatticeOracle,
@@ -226,12 +236,21 @@ def _lattice_astar(
     net_id: int,
     own_pins: frozenset[tuple[int, int, int]],
     layer_step_mul: tuple[float, float] = (1.0, 1.0),
+    dense_axis: dict[tuple[int, int], tuple[int, int]] | None = None,
+    forbidden_nodes: frozenset[tuple[int, int]] = frozenset(),
 ) -> list[tuple[int, int, int]] | None:
     """A* over `(layer, ix, iy)` nodes. Cardinal + 45° diagonal planar moves
     and a via (layer flip); a candidate edge is admitted only if the oracle
-    finds its swept channel/via clear. Returns the node path or None."""
+    finds its swept channel/via clear. Returns the node path or None.
+
+    `dense_axis` maps a dense-pin-row node `(ix, iy)` to the perpendicular
+    approach axis: a planar move that enters OR leaves such a node must run
+    along that axis. This keeps each pin in a tight row approached on its own
+    perpendicular column so adjacent nets' halos (which exceed half a pitch)
+    don't contaminate a neighbour pin's approach lane."""
     if not starts or not goals:
         return None
+    dense_axis = dense_axis or {}
 
     open_heap: list[
         tuple[float, float, tuple[int, int, int], tuple[int, int, int] | None]
@@ -256,10 +275,22 @@ def _lattice_astar(
             continue
         layer, ix, iy = cur
         cur_world = geom.world(ix, iy)
+        cur_perp = dense_axis.get((ix, iy))
 
         for dx, dy in _PLANAR_MOVES:
             nix, niy = ix + dx, iy + dy
             if not geom.in_bounds(nix, niy):
+                continue
+            # Another dense pin's reserved approach lane — keep this net's
+            # trunk out so the pin's owner can always reach it.
+            if (nix, niy) in forbidden_nodes:
+                continue
+            # Dense-row pins are entered/left only along their perpendicular
+            # approach axis (keeps neighbour pins' halos out of each lane).
+            if cur_perp is not None and (dx, dy) not in _perp_ok(cur_perp):
+                continue
+            nbr_perp = dense_axis.get((nix, niy))
+            if nbr_perp is not None and (dx, dy) not in _perp_ok(nbr_perp):
                 continue
             nbr = (layer, nix, niy)
             nbr_world = geom.world(nix, niy)
@@ -293,3 +324,183 @@ def _lattice_astar(
                 heapq.heappush(open_heap, (new_g + h, new_g, nbr, step_dir))
 
     return None
+
+
+# ---------------------------------------------------------------------------
+# Node path -> waypoints -> SignalPath
+# ---------------------------------------------------------------------------
+
+
+def _nodes_to_waypoints(geom: LatticeGeom, nodes: list[tuple[int, int, int]]) -> list[Waypoint]:
+    """Collapse a node path into corner/via waypoints. A waypoint is kept at
+    the ends, at every planar direction change, and on both sides of a layer
+    flip (so `waypoints_to_path` emits a Via at the shared xy)."""
+    def to_wp(node: tuple[int, int, int]) -> Waypoint:
+        layer, ix, iy = node
+        wx, wy = geom.world(ix, iy)
+        return Waypoint(point=Point2D(x=round(wx, 3), y=round(wy, 3)), layer=layer + 1)
+
+    keep = [nodes[0]]
+    for i in range(1, len(nodes) - 1):
+        prev, cur, nxt = nodes[i - 1], nodes[i], nodes[i + 1]
+        if cur[0] != prev[0] or nxt[0] != cur[0]:
+            keep.append(cur)  # adjacent to a layer flip (via)
+            continue
+        d_in = (cur[1] - prev[1], cur[2] - prev[2])
+        d_out = (nxt[1] - cur[1], nxt[2] - cur[2])
+        if d_in != d_out:
+            keep.append(cur)  # planar corner
+    keep.append(nodes[-1])
+    return [to_wp(n) for n in keep]
+
+
+def _own_pin_cells(g: Grid, net: Net) -> frozenset[tuple[int, int, int]]:
+    cells: set[tuple[int, int, int]] = set()
+    for ep in net.endpoints:
+        gx, gy = g.to_grid(ep.position.x, ep.position.y)
+        cells.add((0, gy, gx))
+        cells.add((1, gy, gx))
+    return frozenset(cells)
+
+
+def _route_one_net_lattice(
+    geom: LatticeGeom, oracle: LatticeOracle, net: Net, net_id: int,
+    dense_axis: dict[tuple[int, int], tuple[int, int]] | None = None,
+    approach_reserved: dict[tuple[int, int], set[tuple[int, int]]] | None = None,
+) -> list[SignalPath]:
+    """Route one net as a greedy Steiner tree on the lattice. First slave:
+    master → (must_pass) → slave. Later slaves branch off the committed trunk
+    nodes (multi-source A*). Each leg is emitted as its own SignalPath and its
+    halo committed to the oracle before the next net routes."""
+    g = oracle.g
+    own_pins = _own_pin_cells(g, net)
+    # Forbid this net from every dense-pin approach lane EXCEPT the lanes that
+    # serve its own pins — so a trunk never parks on a neighbour pin's only
+    # approach.
+    own_pin_nodes = {
+        geom.node_of_pin(ep.position.x, ep.position.y) for ep in net.endpoints
+    }
+    forbidden_nodes = frozenset(
+        anode for anode, served in (approach_reserved or {}).items()
+        if not (served & own_pin_nodes)
+    )
+
+    layer_step_mul = (1.0, 1.0)
+    must_pass_nodes: list[tuple[int, int, int]] = []
+    if net.hint is not None:
+        if net.hint.prefer_layer is not None:
+            other = 1 if net.hint.prefer_layer == 1 else 0
+            mul = [1.0, 1.0]
+            mul[other] = 2.0
+            layer_step_mul = (mul[0], mul[1])
+        for wp in net.hint.must_pass:
+            ix, iy = geom.node_of_pin(wp.x, wp.y)
+            must_pass_nodes.append((wp.layer - 1, ix, iy))
+
+    mix, miy = geom.node_of_pin(net.master.position.x, net.master.position.y)
+    master_nodes = [(0, mix, miy), (1, mix, miy)]
+    trunk_nodes: set[tuple[int, int, int]] = set()
+    out: list[SignalPath] = []
+
+    for i, slave in enumerate(net.slaves):
+        six, siy = geom.node_of_pin(slave.position.x, slave.position.y)
+        slave_goal = {(0, six, siy), (1, six, siy)}
+        if i == 0:
+            leg_goals = [{n} for n in must_pass_nodes] + [slave_goal]
+            starts = master_nodes
+        else:
+            leg_goals = [slave_goal]
+            starts = list(trunk_nodes)
+
+        full_nodes: list[tuple[int, int, int]] = []
+        for goals in leg_goals:
+            seg = _lattice_astar(
+                geom, oracle, starts, set(goals),
+                net_id=net_id, own_pins=own_pins, layer_step_mul=layer_step_mul,
+                dense_axis=dense_axis, forbidden_nodes=forbidden_nodes,
+            )
+            if seg is None:
+                raise RouteFailure(
+                    net, f"lattice: no route to {slave.instance_name}", (),
+                )
+            full_nodes.extend(seg if not full_nodes else seg[1:])
+            starts = [seg[-1]]
+
+        trunk_nodes.update(full_nodes)
+        name = f"{net.bus_name}_{net.signal}_{slave.instance_name}"
+        path = waypoints_to_path(
+            name, _nodes_to_waypoints(geom, full_nodes),
+            via_diameter=oracle.dims.via_diameter,
+        )
+        for elt in path.elements:
+            if isinstance(elt, WireSegment):
+                oracle.commit_run(
+                    (elt.start.x, elt.start.y), (elt.end.x, elt.end.y),
+                    elt.layer - 1, net_id,
+                )
+            elif isinstance(elt, Via):
+                oracle.commit_via((elt.position.x, elt.position.y), net_id)
+        out.append(path)
+    return out
+
+
+def _lattice_bus_order(
+    actions: list[tuple[Net, str | None]],
+) -> list[tuple[Net, str | None]]:
+    """TEMP (Stage A): the greedy lattice router is order-sensitive at fan-outs —
+    the last net into a tight cluster gets boxed in by earlier nets' halos.
+    `_ordered_bus_actions` emits the second-of-pair nets in pair declaration
+    order (…GND, then SDA); routing the harder signal (SDA) before power (GND)
+    yields the one ordering empirically validated to route both production
+    boards (SCL, VCC, SDA, GND). Sort just the second-of-pair block (the entries
+    carrying a parallel-target) by `_net_priority`; leave first-of-pair and
+    leftover positions untouched. Replaced by the order-search coordinator in
+    Stage B."""
+    second_slots = [i for i, (_n, target) in enumerate(actions) if target is not None]
+    if len(second_slots) <= 1:
+        return actions
+    ranked = sorted((actions[i] for i in second_slots), key=lambda a: _net_priority(a[0]))
+    out = list(actions)
+    for slot, entry in zip(second_slots, ranked, strict=True):
+        out[slot] = entry
+    return out
+
+
+def route_board(board: Board, dims) -> list[SignalPath]:
+    """Auto-route every bus on the lattice. Drop-in for
+    `autoroute.route_board`: same scheduling (`_ordered_bus_actions`) and
+    bundled-pair ordering, but routes on the 2.54mm lattice so output is
+    on-pitch by construction — no post-route collapse/align/snap passes."""
+    if not board.buses:
+        return []
+    oracle = LatticeOracle.from_board(board, dims)
+    geom = LatticeGeom(oracle.g, dims.pitch)
+    # Dense pin rows (≥3 pins within a pitch) → per-node perpendicular approach
+    # axis, keyed by lattice node.
+    dense_axis: dict[tuple[int, int], tuple[int, int]] = {
+        geom.node_of_pin(x, y): axis
+        for (x, y), axis in _dense_cluster_pin_axes(board).items()
+    }
+    # Each dense pin reserves its two perpendicular approach nodes; only the
+    # net owning that pin may route through them.
+    approach_reserved: dict[tuple[int, int], set[tuple[int, int]]] = {}
+    for pnode, (pdx, pdy) in dense_axis.items():
+        for k in (1, -1):
+            anode = (pnode[0] + k * pdx, pnode[1] + k * pdy)
+            approach_reserved.setdefault(anode, set()).add(pnode)
+    bound = board.bound_devices()
+    paths: list[SignalPath] = []
+    net_id = 0
+    for bus in board.buses:
+        nets_by_signal = {n.signal: n for n in resolve_bus(bus, bound)}
+        actions = _lattice_bus_order(_ordered_bus_actions(bus.kind, nets_by_signal))
+        for net, _target_sig in actions:
+            net_id += 1
+            try:
+                paths.extend(_route_one_net_lattice(
+                    geom, oracle, net, net_id, dense_axis, approach_reserved,
+                ))
+            except RouteFailure as exc:
+                exc.partial = tuple(paths)
+                raise
+    return paths

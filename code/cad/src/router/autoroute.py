@@ -528,7 +528,15 @@ def route_board(board: Board, dims) -> list[SignalPath]:
     VCC alongside GND, SCL alongside SDA for I²C) — see
     `_ordered_bus_actions` for the schedule. Runs the global
     staircase → 45° collapse as a final pass.
+
+    When `dims.router_engine == "lattice"` this delegates to the
+    breadboard-lattice router, which produces on-pitch geometry by
+    construction (no post-route collapse/align/snap passes).
     """
+    if getattr(dims, "router_engine", "voxel") == "lattice":
+        from router import lattice  # local import: lattice imports RouteFailure from here
+        return lattice.route_board(board, dims)
+
     if not board.buses:
         return []
 

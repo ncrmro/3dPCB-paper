@@ -11,6 +11,12 @@ name: i2c_midline_sensors
 # needs more spread than the no-OLED variant to stay fully clean (every
 # cross-net wall ≥ buffer, not just above the half-floor). No
 # `dim.buffer` override — the default is the target wall thickness.
+
+# Route on the breadboard lattice so runs/corners/vias land on-pitch by
+# construction (voxel remains the global default for other boards).
+dim:
+  router_engine: lattice
+
 levels:
   - name: base
     perimeter: { cx: 0, cy: 0, w: 98, h: 68 }
