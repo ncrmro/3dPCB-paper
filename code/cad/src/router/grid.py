@@ -164,10 +164,11 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
     """Prepare the routing grid with all static blockers in place.
 
     Returns (grid, pin_cells). `g.blocked` carries the immutable static
-    blockers — the edge-clearance strip and each flat-mounted device's L2
-    pocket footprint. `pin_cells` is every device pin hole: the lattice
-    oracle lets a net terminate on its own pin but treats every pin as an
-    obstacle to other nets.
+    blockers — the edge-clearance strip, each flat-mounted device's L2
+    pocket footprint, and each header-mounted device's L2 connector-body
+    footprint. `pin_cells` is every device pin hole: the lattice oracle lets
+    a net terminate on its own pin but treats every pin as an obstacle to
+    other nets.
     """
     g = Grid.from_board(board, res=dims.res)
 
@@ -205,28 +206,32 @@ def _build_grid(board: Board, dims) -> tuple[Grid, set[tuple[int, int, int]]]:
             pin_cells.add((0, gy, gx))
             pin_cells.add((1, gy, gx))
 
-    # Device pockets — a flat-mounted device's pocket cuts away the top
-    # face, so L2 channels can't pass through its footprint (+ margin). L1
-    # stays clear (the substrate floor is intact). The pin cell itself
-    # stays routable as a via target.
+    # Top-face (L2) keep-outs. A flat-mounted device's pocket cuts away the
+    # top face; a header-mounted device's plastic body sits on the top face
+    # as a pedestal. Either way an L2 channel can't run under that footprint
+    # (it would be buried under the part). L1 stays clear (the substrate
+    # floor is intact), so a header pin is reached on the bottom face and
+    # connected up through its own through-hole. The pin cell itself stays
+    # routable as a via / through-hole target.
     pocket_margin = dims.pocket_margin_mm
     for inst in board.devices:
         if inst.header is not None:
-            continue
-        device = inst.resolved_device()
-        fp = device.footprint
-        if inst.rotation in (0, 180):
-            w, h = fp.w, fp.h
+            conn = inst.header.resolved_connector()
+            fp_w, fp_h = conn.body_width, conn.body_depth
+            cx, cy = inst.position.x, inst.position.y
         else:
-            w, h = fp.h, fp.w
-        pocket = Rect(
-            cx=inst.position.x + fp.cx,
-            cy=inst.position.y + fp.cy,
-            w=w + 2 * pocket_margin,
-            h=h + 2 * pocket_margin,
+            fp = inst.resolved_device().footprint
+            fp_w, fp_h = fp.w, fp.h
+            cx, cy = inst.position.x + fp.cx, inst.position.y + fp.cy
+        if inst.rotation not in (0, 180):
+            fp_w, fp_h = fp_h, fp_w
+        keepout = Rect(
+            cx=cx, cy=cy,
+            w=fp_w + 2 * pocket_margin,
+            h=fp_h + 2 * pocket_margin,
         )
-        gx_lo, gy_lo = g.to_grid(pocket.x_min, pocket.y_min)
-        gx_hi, gy_hi = g.to_grid(pocket.x_max, pocket.y_max)
+        gx_lo, gy_lo = g.to_grid(keepout.x_min, keepout.y_min)
+        gx_hi, gy_hi = g.to_grid(keepout.x_max, keepout.y_max)
         for gy in range(max(gy_lo, 0), min(gy_hi + 1, g.ny)):
             for gx in range(max(gx_lo, 0), min(gx_hi + 1, g.nx)):
                 if (1, gy, gx) in pin_cells:
