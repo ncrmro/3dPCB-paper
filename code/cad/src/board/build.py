@@ -132,7 +132,7 @@ def resolve_dims(board: Board) -> ResolvedDims:
         merged["via_diameter"] = merged["hole_diameter"]
     return ResolvedDims(
         thickness=base.thickness,
-        router_engine=board.dim.router_engine or "voxel",
+        router_engine=board.dim.router_engine or "lattice",
         **merged,
     )
 
