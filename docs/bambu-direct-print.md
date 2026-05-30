@@ -45,7 +45,7 @@ browser ─► Astro /api/printer/{status,print,print/status}
 | Bambu Studio CLI slice (P2S 0.4, 0.20mm Std, PLA)     | OK    |
 | Bridge `/status.json`, `/health`, `/print`, `/print/status` | OK |
 | Astro proxies (UDS via `socketPath`)                  | OK    |
-| `/printer` live status page (polls every 2 s)         | OK    |
+| Right-side printer panel on every gallery page (persisted across nav via Astro `transition:persist`) | OK |
 | Print button on every CAD model page                  | OK    |
 | Real print fired from MQTT and accepted by printer    | OK    |
 | Camera via RTSPS port 322 (H.264 1080p → MJPEG)       | OK    |
@@ -180,7 +180,7 @@ Concrete look-up paths:
 
 A future bridge addition should decode the high half on the way out so
 `/status.json` includes `print_error_decoded: { module: "0x0500",
-code: "0x7091" }` and `/printer` can render a one-line plain label
+code: "0x7091" }` and the panel can render a one-line plain label
 instead of a 9-digit decimal.
 
 ## Caveats and gotchas
@@ -233,10 +233,10 @@ When picking this up:
 1. **Decode print errors in the bridge.** Add a tiny `_decode_error()`
    that splits a 32-bit code into `(module, code)` hex pair and maps
    known prefixes (`0x0500` print, `0x0700` AMS, `0x0300` toolhead) to a
-   short label. Surface in `/status.json` so the `/printer` page renders
-   a plain label instead of a 9-digit decimal. Removes the entire class
-   of misdiagnosis the bed-type confusion fell into.
-2. **SSE push instead of 2 s polling** on `/printer` once polling proves
+   short label. Surface in `/status.json` so the panel renders a plain
+   label instead of a 9-digit decimal. Removes the entire class of
+   misdiagnosis the bed-type confusion fell into.
+2. **SSE push instead of 2 s polling** in the panel once polling proves
    stable. The bridge already holds the freshest state in memory; just
    add an SSE generator on the same UDS.
 3. **`bin/print <board>` shell wrapper** that does the same flow without

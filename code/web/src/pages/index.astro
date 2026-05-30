@@ -16,6 +16,7 @@ import { parse as parseYaml } from "yaml";
 import cadManifestYaml from "../manifest.cad.yaml?raw";
 import kicadManifestYaml from "../manifest.kicad.yaml?raw";
 import vitaminsManifestYaml from "../manifest.vitamins.yaml?raw";
+import Layout from "../layouts/Layout.astro";
 
 const placementYamls = import.meta.glob<string>(
   "../../../kicad/placements/*.yaml",
@@ -102,17 +103,7 @@ const placements: Placement[] = Object.values(placementYamls).map(
 );
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>3dPCB-paper gallery</title>
-    <link rel="stylesheet" href="/style.css" />
-    <!-- model-viewer registers <model-viewer> as a custom element on import. -->
-    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-  </head>
-  <body>
+<Layout title="3dPCB-paper gallery">
     <header class="header">
       <h1>3dPCB-paper gallery</h1>
       <div class="header-status">
@@ -371,7 +362,7 @@ const placements: Placement[] = Object.values(placementYamls).map(
       <div id="lightbox-caption" class="lightbox-caption"></div>
     </div>
 
-    <script is:inline>
+    <script is:inline data-astro-rerun>
       // "Open" buttons POST to /api/open which spawns OpenSCAD or
       // KiCad on the server with the named source file. Single
       // handler covers every card on the page.
@@ -401,7 +392,7 @@ const placements: Placement[] = Object.values(placementYamls).map(
       });
     </script>
 
-    <script is:inline>
+    <script is:inline data-astro-rerun>
       // Pinning + per-card auto-rotate, both persisted in localStorage.
       //
       // PIN_KEY stores a JSON array of pin-ids (matches data-pin-id on
@@ -534,5 +525,4 @@ const placements: Placement[] = Object.values(placementYamls).map(
         import.meta.hot.on("manifest-changed", () => location.reload());
       }
     </script>
-  </body>
-</html>
+</Layout>

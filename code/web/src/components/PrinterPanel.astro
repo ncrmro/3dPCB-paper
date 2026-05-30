@@ -1,0 +1,594 @@
+---
+// Right-side floating printer panel. Compact status + camera + controls,
+// available across all gallery pages so a user can keep an eye on the
+// printer without leaving the model/embodiment view.
+//
+// Self-contained — drop `<PrinterPanel />` in any page's body and it
+// reads /api/printer/{status,camera/*,control/*} on its own. No data
+// flows in via props; everything comes from the bridge UDS proxy.
+//
+// Collapse state persists in localStorage so navigating between pages
+// keeps the panel in its previous shape.
+//
+// Skip on /printer — that route is the dedicated full-detail page and
+// duplicating the panel would just be noise.
+---
+
+<aside id="pp" class="pp" aria-label="Printer panel" transition:persist="printer-panel">
+  <button id="pp-toggle" type="button" class="pp-toggle" aria-label="Toggle printer panel">
+    <span class="pp-chev">›</span>
+  </button>
+  <div id="pp-resize" class="pp-resize" role="separator" aria-orientation="vertical"
+       aria-label="Resize printer panel" tabindex="0"></div>
+
+  <div class="pp-body">
+    <h2 class="pp-head">Printer</h2>
+
+    <div id="pp-summary" class="pp-summary">
+      <p class="pp-muted">connecting…</p>
+    </div>
+
+    <div class="pp-cam">
+      <div class="pp-cam-controls">
+        <button id="pp-cam-toggle" type="button" class="pp-btn">Camera</button>
+        <span id="pp-cam-msg" class="pp-muted pp-tiny">off</span>
+      </div>
+      <div class="pp-cam-stage">
+        <div id="pp-cam-skel" class="pp-cam-skel">
+          <span class="pp-cam-skel-label">camera off</span>
+        </div>
+        <img id="pp-cam-frame" class="pp-cam-frame pp-hidden" alt="live frame" />
+      </div>
+    </div>
+
+    <div class="pp-controls">
+      <div class="pp-ctrl-row">
+        <span class="pp-label">Job</span>
+        <div class="pp-btn-row">
+          <button data-pp-print="pause" type="button" class="pp-btn">Pause</button>
+          <button data-pp-print="resume" type="button" class="pp-btn">Resume</button>
+          <button data-pp-print="stop" type="button" class="pp-btn pp-danger"
+                  data-confirm="Stop the running print? This cannot be undone.">Stop</button>
+        </div>
+      </div>
+      <div class="pp-ctrl-row">
+        <span class="pp-label">Chamber</span>
+        <div class="pp-btn-row" data-pp-light-node="chamber_light">
+          <button data-pp-light-mode="on" type="button" class="pp-btn">On</button>
+          <button data-pp-light-mode="off" type="button" class="pp-btn">Off</button>
+        </div>
+      </div>
+      <div class="pp-ctrl-row">
+        <span class="pp-label">Work</span>
+        <div class="pp-btn-row" data-pp-light-node="work_light">
+          <button data-pp-light-mode="on" type="button" class="pp-btn">On</button>
+          <button data-pp-light-mode="off" type="button" class="pp-btn">Off</button>
+          <button data-pp-light-mode="flashing" type="button" class="pp-btn">Flash</button>
+        </div>
+      </div>
+      <div id="pp-msg" class="pp-msg pp-muted pp-tiny"></div>
+    </div>
+
+  </div>
+</aside>
+
+<style is:global>
+  /* Width lives on a CSS custom property so the panel and the body's
+     reflow padding stay in lockstep. Drag-resize writes to this var
+     directly; localStorage persists across nav. */
+  :root { --pp-width: 320px; }
+  body {
+    padding-right: var(--pp-width);
+    transition: padding-right 0.18s ease;
+  }
+  body.pp-collapsed { padding-right: 28px; }
+  /* During an active drag, kill transitions so the panel tracks the
+     cursor 1:1, and freeze text selection so the document doesn't
+     start highlighting random spans as the pointer moves. */
+  body.pp-resizing,
+  body.pp-resizing .pp { transition: none !important; }
+  body.pp-resizing,
+  body.pp-resizing * { user-select: none; }
+  @media (max-width: 800px) {
+    body, body.pp-collapsed { padding-right: 0; }
+    .pp { transform: translateX(100%); }
+    body:not(.pp-collapsed) .pp { transform: translateX(0); box-shadow: -2px 0 16px rgba(0,0,0,0.25); }
+  }
+</style>
+
+<style>
+  /* Match the gallery's design tokens (declared on :root in style.css):
+     --bg, --bg-card, --text, --text-muted, --accent, --accent-hover,
+     --border, --radius. Inherit the gallery font so the panel reads as
+     part of the same surface, not a bolted-on dev tool. */
+  .pp {
+    position: fixed;
+    top: 0; right: 0; bottom: 0;
+    width: var(--pp-width);
+    background: var(--bg-card, #16213e);
+    border-left: 1px solid var(--border, #2a2a4a);
+    display: flex;
+    flex-direction: column;
+    font-family: inherit;
+    font-size: 0.85rem;
+    color: var(--text, #e0e0e0);
+    z-index: 100;
+    transition: width 0.18s ease;
+    box-shadow: -2px 0 16px rgba(0, 0, 0, 0.35);
+  }
+  :global(body.pp-collapsed) .pp { width: 28px; box-shadow: none; }
+  :global(body.pp-collapsed) .pp-body { display: none; }
+  :global(body.pp-collapsed) .pp-resize { display: none; }
+
+  /* Resize handle: thin strip on the panel's left edge, below the
+     toggle button. Hover and active drag light it with the accent so
+     the affordance is obvious. */
+  .pp-resize {
+    position: absolute;
+    left: -3px;
+    top: 28px;
+    bottom: 0;
+    width: 6px;
+    cursor: col-resize;
+    background: transparent;
+    transition: background 0.12s ease;
+    touch-action: none;
+    z-index: 1;
+  }
+  .pp-resize:hover,
+  :global(body.pp-resizing) .pp-resize {
+    background: var(--accent, #e94560);
+  }
+  .pp-resize:focus-visible {
+    outline: none;
+    background: var(--accent, #e94560);
+  }
+
+  .pp-toggle {
+    position: absolute;
+    left: 0; top: 0;
+    width: 28px; height: 28px;
+    border: none;
+    border-right: 1px solid var(--border, #2a2a4a);
+    border-bottom: 1px solid var(--border, #2a2a4a);
+    background: rgba(0, 0, 0, 0.25);
+    cursor: pointer;
+    font-size: 15px;
+    color: var(--text-muted, #8892a4);
+    line-height: 1;
+    transition: color 0.15s ease;
+  }
+  .pp-toggle:hover { color: var(--accent-hover, #ff6b81); }
+  .pp-chev { display: inline-block; transition: transform 0.18s ease; }
+  :global(body:not(.pp-collapsed)) .pp-chev { transform: rotate(180deg); }
+
+  .pp-body {
+    overflow-y: auto;
+    padding: 36px 14px 16px 14px;
+    flex: 1;
+  }
+  .pp-head {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    font-weight: 600;
+    color: var(--text-muted, #8892a4);
+    margin: 0 0 0.8rem;
+  }
+  .pp-muted { color: var(--text-muted, #8892a4); }
+  .pp-tiny { font-size: 0.75rem; }
+
+  .pp-summary { margin-bottom: 1rem; }
+  .pp-summary .pp-row {
+    display: grid;
+    grid-template-columns: 5.5rem 1fr;
+    gap: 0.5rem;
+    margin-bottom: 0.3rem;
+    font-size: 0.8rem;
+    align-items: baseline;
+  }
+  .pp-summary .pp-row > span:first-child {
+    color: var(--text-muted, #8892a4);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+
+  /* Badges — desaturated palette that reads on the dark surface
+     without overpowering the actual data values. */
+  .pp-badge {
+    display: inline-block;
+    padding: 1px 7px;
+    border-radius: 3px;
+    font-size: 0.7rem;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 0.03em;
+  }
+  .pp-b-connected   { background: #1f3a2a; color: #6fc282; }
+  .pp-b-disconnected{ background: #3a1f25; color: #e95a6b; }
+  .pp-b-finish      { background: rgba(255,255,255,0.05); color: var(--text-muted, #8892a4); }
+  .pp-b-running     { background: #1a2a4a; color: #6fa8f0; }
+  .pp-b-pause       { background: #3a2e1a; color: #e9c46f; }
+  .pp-b-failed      { background: #3a1f25; color: #e95a6b; }
+
+  .pp-bar {
+    height: 4px;
+    background: rgba(0, 0, 0, 0.4);
+    border-radius: 2px;
+    overflow: hidden;
+    margin: 3px 0;
+  }
+  .pp-bar > div {
+    height: 100%;
+    background: var(--accent, #e94560);
+    transition: width 0.4s ease;
+  }
+
+  /* Camera stage — single positioned container so the skeleton sits
+     behind the live <img>. Same aspect ratio either way; flipping the
+     hidden class swaps which one shows. */
+  .pp-cam { margin-bottom: 1.1rem; }
+  .pp-cam-controls {
+    display: flex; gap: 0.5rem; align-items: center;
+    margin-bottom: 0.4rem;
+  }
+  .pp-cam-stage {
+    position: relative;
+    width: 100%;
+    aspect-ratio: 16 / 9;
+    background: #0f0f1a;
+    border: 1px solid var(--border, #2a2a4a);
+    border-radius: var(--radius, 8px);
+    overflow: hidden;
+  }
+  .pp-cam-frame {
+    position: absolute;
+    inset: 0;
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+  }
+  .pp-cam-frame.pp-hidden { display: none; }
+
+  /* Skeleton: identical shimmer to .skeleton-img in style.css so the
+     panel's "camera off" state matches the gallery's "GLB loading"
+     state visually. */
+  .pp-cam-skel {
+    position: absolute;
+    inset: 0;
+    background: linear-gradient(90deg, #0f0f1a 25%, #1a1a30 50%, #0f0f1a 75%);
+    background-size: 200% 100%;
+    animation: ppShimmer 1.5s infinite;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .pp-cam-skel.pp-hidden { display: none; }
+  .pp-cam-skel-label {
+    color: var(--text-muted, #8892a4);
+    font-size: 0.72rem;
+    text-transform: uppercase;
+    letter-spacing: 0.1em;
+    background: rgba(0, 0, 0, 0.45);
+    padding: 3px 9px;
+    border-radius: 3px;
+  }
+  @keyframes ppShimmer {
+    0%   { background-position: 200% 0; }
+    100% { background-position: -200% 0; }
+  }
+
+  .pp-controls .pp-ctrl-row {
+    display: grid;
+    grid-template-columns: 4.5rem 1fr;
+    gap: 0.4rem;
+    align-items: center;
+    margin-bottom: 0.4rem;
+  }
+  .pp-label {
+    color: var(--text-muted, #8892a4);
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+  }
+  .pp-btn-row { display: flex; gap: 0.3rem; flex-wrap: wrap; }
+  .pp-btn {
+    padding: 3px 9px;
+    border: 1px solid var(--border, #2a2a4a);
+    background: rgba(0, 0, 0, 0.25);
+    border-radius: 4px;
+    cursor: pointer;
+    font: inherit;
+    font-size: 0.75rem;
+    color: var(--text, #e0e0e0);
+    transition: border-color 0.15s ease, color 0.15s ease, background 0.15s ease;
+  }
+  .pp-btn:hover { border-color: var(--accent, #e94560); }
+  .pp-btn:disabled { opacity: 0.4; cursor: default; }
+  .pp-btn:disabled:hover { border-color: var(--border, #2a2a4a); }
+  .pp-btn.pp-active {
+    background: var(--accent, #e94560);
+    color: #fff;
+    border-color: var(--accent, #e94560);
+  }
+  .pp-btn.pp-danger { color: #e95a6b; }
+  .pp-btn.pp-danger:hover {
+    background: #3a1f25;
+    border-color: #e95a6b;
+    color: #ff8090;
+  }
+
+  .pp-msg {
+    margin-top: 0.5rem;
+    min-height: 1em;
+    color: var(--text-muted, #8892a4);
+  }
+  .pp-msg.pp-err { color: #e95a6b; }
+
+</style>
+
+<script is:inline>
+  (function () {
+    // The aside above is transition:persist'd, so its DOM (including
+    // the live MJPEG <img>) survives ClientRouter navigations. Astro
+    // may still re-execute this <script> on each nav though, and a
+    // re-init would tear down the closure that owns the setInterval
+    // pollers and (worse) might re-set the camera img's src — which
+    // terminates the multipart stream connection. A window-scoped
+    // sentinel makes init strictly once-per-tab-lifetime so the camera
+    // keeps streaming uninterrupted as the user clicks around.
+    if (window.__ppInit) return;
+    window.__ppInit = true;
+
+    const COLLAPSE_KEY = "printer-panel-collapsed";
+    const WIDTH_KEY = "printer-panel-width";
+    const MIN_W = 240;       // narrow enough to still fit two stat columns
+    const MAX_W = 640;       // wide enough to make camera big, not eat the page
+    const DEFAULT_W = 320;
+    const KEY_STEP = 16;     // px per arrow-key press when handle is focused
+
+    function applyWidth(px) {
+      px = Math.max(MIN_W, Math.min(MAX_W, Math.round(px)));
+      document.documentElement.style.setProperty("--pp-width", px + "px");
+      return px;
+    }
+
+    const savedW = parseInt(localStorage.getItem(WIDTH_KEY) || "", 10);
+    if (Number.isFinite(savedW)) applyWidth(savedW);
+
+    if (localStorage.getItem(COLLAPSE_KEY) === "1") {
+      document.body.classList.add("pp-collapsed");
+    }
+
+    const toggle = document.getElementById("pp-toggle");
+    toggle.addEventListener("click", () => {
+      const next = !document.body.classList.contains("pp-collapsed");
+      document.body.classList.toggle("pp-collapsed", next);
+      localStorage.setItem(COLLAPSE_KEY, next ? "1" : "0");
+    });
+
+    // Drag resize. Use pointer events so mouse + touch + pen all share
+    // one code path; capture the pointer so the drag survives the
+    // cursor leaving the 6px strip.
+    const resize = document.getElementById("pp-resize");
+    let dragging = false;
+
+    function startDrag(ev) {
+      if (document.body.classList.contains("pp-collapsed")) return;
+      dragging = true;
+      document.body.classList.add("pp-resizing");
+      try { resize.setPointerCapture(ev.pointerId); } catch {}
+      ev.preventDefault();
+    }
+    function moveDrag(ev) {
+      if (!dragging) return;
+      // Panel pinned to the right edge — its width is (viewport width
+      // minus the cursor's clientX). clientX hits 0 at the left edge
+      // so this works regardless of any body padding.
+      applyWidth(window.innerWidth - ev.clientX);
+    }
+    function endDrag(ev) {
+      if (!dragging) return;
+      dragging = false;
+      document.body.classList.remove("pp-resizing");
+      try { resize.releasePointerCapture(ev.pointerId); } catch {}
+      const cur = getComputedStyle(document.documentElement)
+        .getPropertyValue("--pp-width").trim();
+      const px = parseInt(cur, 10);
+      if (Number.isFinite(px)) localStorage.setItem(WIDTH_KEY, String(px));
+    }
+    resize.addEventListener("pointerdown", startDrag);
+    resize.addEventListener("pointermove", moveDrag);
+    resize.addEventListener("pointerup", endDrag);
+    resize.addEventListener("pointercancel", endDrag);
+
+    // Keyboard: arrow keys nudge by KEY_STEP when the handle is focused
+    // (tab into it). Accessible alternative to mouse drag.
+    resize.addEventListener("keydown", (ev) => {
+      const cur = parseInt(
+        getComputedStyle(document.documentElement).getPropertyValue("--pp-width"),
+        10,
+      ) || DEFAULT_W;
+      let next = cur;
+      if (ev.key === "ArrowLeft")  next = cur + KEY_STEP;
+      else if (ev.key === "ArrowRight") next = cur - KEY_STEP;
+      else if (ev.key === "Home") next = MAX_W;
+      else if (ev.key === "End")  next = MIN_W;
+      else return;
+      ev.preventDefault();
+      const applied = applyWidth(next);
+      localStorage.setItem(WIDTH_KEY, String(applied));
+    });
+
+    const summary = document.getElementById("pp-summary");
+    const msg = document.getElementById("pp-msg");
+
+    function fmt(v, suffix = "") {
+      return v == null ? '<span class="pp-muted">—</span>' : v + suffix;
+    }
+    function badge(label, klass) {
+      return `<span class="pp-badge pp-b-${klass}">${label}</span>`;
+    }
+    function gcodeBadge(state) {
+      const k = (state || "").toLowerCase() || "finish";
+      const known = ["finish", "running", "pause", "failed"];
+      return badge(state || "—", known.includes(k) ? k : "finish");
+    }
+    function flash(text, isErr) {
+      msg.textContent = text;
+      msg.className = isErr ? "pp-msg pp-tiny pp-err" : "pp-msg pp-tiny pp-muted";
+      setTimeout(() => { msg.textContent = ""; }, 4000);
+    }
+
+    async function pollStatus() {
+      let res, body;
+      try {
+        res = await fetch("/api/printer/status", { cache: "no-store" });
+        body = await res.json();
+      } catch (err) {
+        summary.innerHTML = `<p class="pp-muted pp-tiny">offline: ${err}</p>`;
+        return;
+      }
+      if (!res.ok) {
+        summary.innerHTML = `<p class="pp-muted pp-tiny">${body.error || res.statusText}</p>`;
+        return;
+      }
+      const p = body.print || {};
+      const link = badge(body.connected ? "MQTT" : "off", body.connected ? "connected" : "disconnected");
+      const job = gcodeBadge(p.gcode_state);
+      const pct = p.mc_percent ?? 0;
+      summary.innerHTML = `
+        <div class="pp-row"><span>Link</span><span>${link} ${job}</span></div>
+        <div class="pp-row"><span>Job</span><span>${fmt(p.subtask_name)}</span></div>
+        <div class="pp-row"><span>Progress</span><span>${pct}%
+          <div class="pp-bar"><div style="width:${pct}%"></div></div>
+          ${fmt(p.layer_num)}/${fmt(p.total_layer_num)}</span></div>
+        <div class="pp-row"><span>ETA</span><span>${fmt(p.mc_remaining_time, " min")}</span></div>
+        <div class="pp-row"><span>Nozzle</span><span>${fmt(p.nozzle_temper, "°C")}
+          ${p.nozzle_target_temper ? '<span class="pp-muted">→' + p.nozzle_target_temper + '°C</span>' : ''}</span></div>
+        <div class="pp-row"><span>Bed</span><span>${fmt(p.bed_temper, "°C")}
+          ${p.bed_target_temper ? '<span class="pp-muted">→' + p.bed_target_temper + '°C</span>' : ''}</span></div>
+      `;
+
+      // Reflect light state in the controls block.
+      const lightMap = {};
+      for (const l of (p.lights_report || [])) lightMap[l.node] = l.mode;
+      document.querySelectorAll('.pp-btn-row[data-pp-light-node]').forEach((row) => {
+        const cur = lightMap[row.dataset.ppLightNode];
+        row.querySelectorAll('button[data-pp-light-mode]').forEach((btn) => {
+          btn.classList.toggle("pp-active", btn.dataset.ppLightMode === cur);
+        });
+      });
+    }
+
+    // ---- Camera ----
+    const camBtn = document.getElementById("pp-cam-toggle");
+    const camMsg = document.getElementById("pp-cam-msg");
+    const camImg = document.getElementById("pp-cam-frame");
+    const camSkel = document.getElementById("pp-cam-skel");
+    const camSkelLabel = document.querySelector(".pp-cam-skel-label");
+    let camRunning = false;
+
+    const STREAM_URL = "/api/printer/camera/stream";
+    function applyCam() {
+      camBtn.textContent = camRunning ? "Stop camera" : "Start camera";
+      if (camRunning) {
+        // Never re-set src if it's already the stream URL — that would
+        // close the multipart connection and force a reconnect. Only
+        // set it when the img has no src (cold start) or was cleared.
+        const cur = camImg.getAttribute("src") || "";
+        if (!cur.endsWith(STREAM_URL)) {
+          camImg.src = STREAM_URL;
+        }
+        camImg.classList.remove("pp-hidden");
+        camSkel.classList.add("pp-hidden");
+      } else {
+        // Only clear src if it was set; clearing an empty src triggers
+        // a NETWORK request for "/" on the current origin (browser quirk).
+        if (camImg.getAttribute("src")) {
+          camImg.removeAttribute("src");
+        }
+        camImg.classList.add("pp-hidden");
+        camSkel.classList.remove("pp-hidden");
+        if (camSkelLabel) camSkelLabel.textContent = "camera off";
+      }
+    }
+    async function refreshCam() {
+      try {
+        const s = await fetch("/api/printer/camera/status").then((r) => r.json());
+        camRunning = !!s.running;
+        applyCam();
+        if (s.error) camMsg.textContent = "error: " + s.error;
+        else camMsg.textContent = camRunning
+          ? "running"
+          : "off";
+      } catch {}
+    }
+    camBtn.addEventListener("click", async () => {
+      camBtn.disabled = true;
+      const next = !camRunning;
+      camMsg.textContent = next ? "starting…" : "stopping…";
+      // Skeleton stays visible during start so the user sees feedback
+      // until the first frame lands (~1-2 s after ffmpeg connects).
+      if (next && camSkelLabel) camSkelLabel.textContent = "warming up…";
+      try {
+        const path = next ? "/api/printer/camera/start" : "/api/printer/camera/stop";
+        const res = await fetch(path, { method: "POST" });
+        const j = await res.json().catch(() => ({}));
+        if (!res.ok) {
+          camMsg.textContent = "failed: " + (j.error || res.statusText);
+          if (camSkelLabel) camSkelLabel.textContent = "camera off";
+          return;
+        }
+        camRunning = next;
+        applyCam();
+      } catch (e) {
+        camMsg.textContent = "network error";
+        if (camSkelLabel) camSkelLabel.textContent = "camera off";
+      } finally {
+        camBtn.disabled = false;
+      }
+    });
+
+    // ---- Print + light controls ----
+    async function post(path, body) {
+      const res = await fetch(path, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(body),
+      });
+      const j = await res.json().catch(() => ({}));
+      if (!res.ok) throw new Error(j.error || res.statusText);
+      return j;
+    }
+    document.querySelectorAll("button[data-pp-print]").forEach((btn) => {
+      btn.addEventListener("click", async () => {
+        const cmd = btn.dataset.ppPrint;
+        const need = btn.dataset.confirm;
+        if (need && !confirm(need)) return;
+        btn.disabled = true;
+        try { await post("/api/printer/control/print", { command: cmd }); flash(`sent: ${cmd}`, false); }
+        catch (e) { flash(`${cmd} failed: ${e.message}`, true); }
+        finally { btn.disabled = false; }
+      });
+    });
+    document.querySelectorAll(".pp-btn-row[data-pp-light-node]").forEach((row) => {
+      const node = row.dataset.ppLightNode;
+      row.querySelectorAll("button[data-pp-light-mode]").forEach((btn) => {
+        btn.addEventListener("click", async () => {
+          const mode = btn.dataset.ppLightMode;
+          btn.disabled = true;
+          try { await post("/api/printer/control/light", { node, mode }); flash(`${node}: ${mode}`); }
+          catch (e) { flash(`${node} ${mode} failed: ${e.message}`, true); }
+          finally { btn.disabled = false; }
+        });
+      });
+    });
+
+    pollStatus();
+    refreshCam();
+    setInterval(pollStatus, 2000);
+    setInterval(refreshCam, 3000);
+  })();
+</script>

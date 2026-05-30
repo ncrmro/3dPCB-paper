@@ -3,6 +3,7 @@ export const prerender = true;
 
 import { parse as parseYaml } from "yaml";
 import cadManifestYaml from "../../manifest.cad.yaml?raw";
+import Layout from "../../layouts/Layout.astro";
 
 interface Placement {
   id: string;
@@ -68,16 +69,7 @@ void placementYamls; // referenced for build-time enumeration parity
 const parts = Object.entries(placement.parts ?? {});
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{placement.label ?? placement.id} — 3dPCB-paper</title>
-    <link rel="stylesheet" href="/style.css" />
-    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-  </head>
-  <body>
+<Layout title={`${placement.label ?? placement.id} — 3dPCB-paper`}>
     <header class="header">
       <a href="/" class="back-link">&larr; gallery</a>
       <h1>{placement.label ?? placement.id}</h1>
@@ -180,7 +172,7 @@ const parts = Object.entries(placement.parts ?? {});
       </section>
     </main>
 
-    <script is:inline>
+    <script is:inline data-astro-rerun>
       // CRITICAL: two-way camera sync between the substrate and PCB panes.
       // Guard against the obvious infinite-feedback loop by latching a flag
       // around programmatic setAttribute calls; model-viewer fires
@@ -209,5 +201,4 @@ const parts = Object.entries(placement.parts ?? {});
         b.addEventListener("camera-change", mirror(b, a));
       })();
     </script>
-  </body>
-</html>
+</Layout>

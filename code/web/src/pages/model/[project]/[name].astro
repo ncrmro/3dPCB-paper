@@ -12,6 +12,7 @@ export const prerender = true;
 import { parse as parseYaml } from "yaml";
 import cadManifestYaml from "../../../manifest.cad.yaml?raw";
 import kicadManifestYaml from "../../../manifest.kicad.yaml?raw";
+import Layout from "../../../layouts/Layout.astro";
 
 // Pre-computed per-substrate reports written by
 // `code/cad/bin/substrate-report` during the prebuild step. Indexed
@@ -171,16 +172,7 @@ if (project === "cad") {
 
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>{focusedLabel} — 3dPCB-paper</title>
-    <link rel="stylesheet" href="/style.css" />
-    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
-  </head>
-  <body>
+<Layout title={`${focusedLabel} — 3dPCB-paper`}>
     <header class="header">
       <a href="/" class="back-link">&larr; gallery</a>
       <h1>{focusedLabel}</h1>
@@ -365,7 +357,7 @@ if (project === "cad") {
         </section>
       )}
 
-      <script is:inline>
+      <script is:inline data-astro-rerun>
         // POST the edited YAML to /api/save-spec (validates the path
         // stays under code/cad/specs/ and writes atomically), then
         // POST /api/rebuild to re-render. The watcher (watch-cad) only
@@ -442,7 +434,7 @@ if (project === "cad") {
         }
       </script>
 
-      <script is:inline>
+      <script is:inline data-astro-rerun>
         // Regenerate button: POST /api/rebuild to re-run the CAD render
         // pipeline (the same prebuild-cad the watcher runs). On success
         // the dev plugin's fs.watch fires glb-changed / report-changed,
@@ -473,7 +465,7 @@ if (project === "cad") {
         })();
       </script>
 
-      <script is:inline>
+      <script is:inline data-astro-rerun>
         // Print button: POSTs {board} to /api/printer/print, then polls
         // /api/printer/print/status every second until the bridge's
         // slice→upload→start pipeline finishes. Once the bridge says
@@ -524,7 +516,7 @@ if (project === "cad") {
                 clearInterval(poll);
                 btn.disabled = false;
                 if (phase === "started") {
-                  status.innerHTML = `started ✓ — <a href="/printer">live status</a>`;
+                  status.textContent = "started ✓ — watch the side panel";
                 }
                 return;
               }
@@ -538,7 +530,7 @@ if (project === "cad") {
         })();
       </script>
 
-      <script is:inline>
+      <script is:inline data-astro-rerun>
         // Pause / resume the model-viewer's auto-rotate. State persists
         // in localStorage under the model's URL path so a refresh stays
         // paused for the same model.
@@ -562,7 +554,7 @@ if (project === "cad") {
         })();
       </script>
 
-      <script is:inline>
+      <script is:inline data-astro-rerun>
         // CRITICAL: dev-mode wiring for the "Open in …" buttons.
         // POST to /api/open; the server spawns the local app with
         // the named source file. Same handler covers both projects.
@@ -593,5 +585,4 @@ if (project === "cad") {
       </script>
 
     </main>
-  </body>
-</html>
+</Layout>

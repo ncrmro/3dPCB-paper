@@ -1,0 +1,46 @@
+---
+// Shared HTML shell for every gallery page. Owns the View Transitions
+// router and the persistent printer panel.
+//
+// `<ClientRouter />` flips navigation from full page reloads to SPA-
+// style diff+swap. Elements with `transition:persist` keep their DOM
+// node across navigations, which is what makes the PrinterPanel's
+// MJPEG `<img>` stream survive page changes — the multipart consumer
+// connection isn't torn down on nav, so the camera doesn't stutter.
+//
+// `data-astro-rerun` is the per-script opt-in for re-execution on
+// every transition; inline scripts without it run once on initial
+// load and stay dormant on subsequent navs. Per-page scripts that
+// bind DOM listeners need it.
+//
+// `showPrinterPanel={false}` is for the dedicated `/printer` page —
+// the panel would just duplicate the full UI there.
+
+import { ClientRouter } from "astro:transitions";
+import PrinterPanel from "../components/PrinterPanel.astro";
+
+interface Props {
+  title: string;
+  showPrinterPanel?: boolean;
+}
+
+const { title, showPrinterPanel = true } = Astro.props;
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>{title}</title>
+    <link rel="stylesheet" href="/style.css" />
+    <!-- model-viewer registers the <model-viewer> custom element on import.
+         Module scripts persist across view transitions automatically. -->
+    <script type="module" src="https://unpkg.com/@google/model-viewer/dist/model-viewer.min.js"></script>
+    <ClientRouter />
+  </head>
+  <body>
+    {showPrinterPanel && <PrinterPanel />}
+    <slot />
+  </body>
+</html>
