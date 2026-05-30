@@ -238,6 +238,19 @@ if (project === "cad") {
             >
               Open in <strong>OpenSCAD</strong>
             </button>
+            <button id="regen-btn" class="dl-btn" type="button">
+              Regenerate <strong>model</strong>
+            </button>
+            <span id="regen-status" class="muted"></span>
+            <button
+              id="print-btn"
+              class="dl-btn"
+              type="button"
+              data-board={(model as CadModel).name}
+            >
+              Print on <strong>Bambu</strong>
+            </button>
+            <span id="print-status" class="muted"></span>
           </>
         ) : (
           (() => {
@@ -331,7 +344,7 @@ if (project === "cad") {
       {project === "cad" && specYamlText && specYamlStem && (
         <section class="spec-editor" aria-labelledby="spec-editor-heading">
           <h2 id="spec-editor-heading">Spec source — <code>specs/{specYamlStem}.yaml</code></h2>
-          <p class="muted">Edit the spec, click Save. The watcher re-renders the GLB and the report updates automatically.</p>
+          <p class="muted">Edit the spec, click Save. It re-renders the GLB and the report updates automatically.</p>
           <textarea
             id="spec-editor-textarea"
             data-spec-name={specYamlStem}
@@ -353,10 +366,12 @@ if (project === "cad") {
       )}
 
       <script is:inline>
-        // POST the edited YAML to /api/save-spec. The endpoint validates
-        // the resolved path stays under code/cad/specs/ and writes
-        // atomically; the watcher (process-compose watch-cad) picks up
-        // the change and rebuilds the GLB.
+        // POST the edited YAML to /api/save-spec (validates the path
+        // stays under code/cad/specs/ and writes atomically), then
+        // POST /api/rebuild to re-render. The watcher (watch-cad) only
+        // watches code/cad/src/*.py, NOT the specs dir, so a spec edit
+        // would otherwise never trigger a rebuild — driving the render
+        // explicitly here is what makes Save → re-render actually work.
         (function () {
           const ta = document.getElementById("spec-editor-textarea");
           const btn = document.getElementById("spec-save-btn");
@@ -375,10 +390,18 @@ if (project === "cad") {
                 }),
               });
               const body = await res.json().catch(() => ({}));
-              if (res.ok && body && body.ok) {
-                status.textContent = "saved ✓ — rebuild in progress";
-              } else {
+              if (!res.ok || !body || !body.ok) {
                 status.textContent = "save failed: " + (body && body.error ? body.error : res.statusText);
+                return;
+              }
+              status.textContent = "saved ✓ — regenerating…";
+              const rb = await fetch("/api/rebuild", { method: "POST" });
+              const rbody = await rb.json().catch(() => ({}));
+              if (rb.ok && rbody && rbody.ok) {
+                status.textContent = "saved ✓ — rebuilt, viewer refreshing";
+              } else {
+                const err = (rbody && (rbody.error || rbody.message)) || rb.statusText;
+                status.textContent = "saved ✓ but rebuild failed: " + err;
               }
             } catch (e) {
               status.textContent = "network error: " + e;
@@ -417,6 +440,102 @@ if (project === "cad") {
           // the route against the fresh manifest.
           import.meta.hot.on("manifest-changed", () => location.reload());
         }
+      </script>
+
+      <script is:inline>
+        // Regenerate button: POST /api/rebuild to re-run the CAD render
+        // pipeline (the same prebuild-cad the watcher runs). On success
+        // the dev plugin's fs.watch fires glb-changed / report-changed,
+        // which swaps the viewer src and reloads the report — so no
+        // manual refresh is needed.
+        (function () {
+          const btn = document.getElementById("regen-btn");
+          const status = document.getElementById("regen-status");
+          if (!btn || !status) return;
+          btn.addEventListener("click", async () => {
+            btn.disabled = true;
+            status.textContent = "regenerating… (rendering all CAD parts)";
+            try {
+              const res = await fetch("/api/rebuild", { method: "POST" });
+              const body = await res.json().catch(() => ({}));
+              if (res.ok && body && body.ok) {
+                status.textContent = "rebuilt ✓ — viewer refreshing";
+              } else {
+                const err = (body && (body.error || body.message)) || res.statusText;
+                status.textContent = "rebuild failed: " + err;
+              }
+            } catch (e) {
+              status.textContent = "network error: " + e;
+            } finally {
+              btn.disabled = false;
+            }
+          });
+        })();
+      </script>
+
+      <script is:inline>
+        // Print button: POSTs {board} to /api/printer/print, then polls
+        // /api/printer/print/status every second until the bridge's
+        // slice→upload→start pipeline finishes. Once the bridge says
+        // "started", live progress is on the /printer page (driven by
+        // MQTT pushes — no further work here).
+        (function () {
+          const btn = document.getElementById("print-btn");
+          const status = document.getElementById("print-status");
+          if (!btn || !status) return;
+          const board = btn.dataset.board;
+          if (!board) return;
+          btn.addEventListener("click", async () => {
+            if (!confirm(`Slice "${board}" and print it on the Bambu P2S?`)) return;
+            btn.disabled = true;
+            status.textContent = "queueing…";
+            let res;
+            try {
+              res = await fetch("/api/printer/print", {
+                method: "POST",
+                headers: { "Content-Type": "application/json" },
+                body: JSON.stringify({ board }),
+              });
+            } catch (e) {
+              status.textContent = "network error: " + e;
+              btn.disabled = false;
+              return;
+            }
+            const body = await res.json().catch(() => ({}));
+            if (!res.ok) {
+              status.textContent = "failed: " + (body.error || res.statusText);
+              btn.disabled = false;
+              return;
+            }
+            // Poll the bridge's job state. Slice ~30s, upload <1s, MQTT
+            // start ~1s — give it 90s before giving up on a clean phase.
+            const deadline = Date.now() + 90_000;
+            const poll = setInterval(async () => {
+              let s;
+              try {
+                s = await fetch("/api/printer/print/status").then((r) => r.json());
+              } catch (e) {
+                status.textContent = "poll error: " + e;
+                return;
+              }
+              const phase = s.phase || "?";
+              status.textContent = `${phase}${s.error ? " — " + s.error : ""}`;
+              if (!s.running) {
+                clearInterval(poll);
+                btn.disabled = false;
+                if (phase === "started") {
+                  status.innerHTML = `started ✓ — <a href="/printer">live status</a>`;
+                }
+                return;
+              }
+              if (Date.now() > deadline) {
+                clearInterval(poll);
+                btn.disabled = false;
+                status.textContent = `timed out polling at phase ${phase}`;
+              }
+            }, 1000);
+          });
+        })();
       </script>
 
       <script is:inline>
