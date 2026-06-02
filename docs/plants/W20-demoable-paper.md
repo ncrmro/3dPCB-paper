@@ -86,7 +86,7 @@ body changes (`<img>` → `<model-viewer>`).
 ## Stacked PRs
 
 Each PR lives in its own worktree under
-`~/.worktrees/ncrmro/3dPCB-paper/{branch}/`. One conventional
+`~/repos/ncrmro/worktrees/3dPCB-paper/{branch}/`. One conventional
 commit per PR.
 
 ### PR A — `chore(layout): move code into code/`
