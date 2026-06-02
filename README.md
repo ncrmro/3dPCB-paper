@@ -98,6 +98,11 @@ The substrate idea generalizes
 `code/cad/src/vitamins/` are mirrored from that PR so updates can be
 diffed back upstream.
 
+## Contributing
+
+See [`CONTRIBUTOR.md`](CONTRIBUTOR.md) for the development workflow and
+[`AGENTS.md`](AGENTS.md) for the agent-oriented map of the repo.
+
 ## License
 
 TBD (target: CERN-OHL-S for hardware, MIT for the Python compiler).

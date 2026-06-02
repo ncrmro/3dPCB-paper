@@ -1,5 +1,7 @@
 # AGENTS.md
 
+@CONTRIBUTOR.md — branching, worktrees, commits, and PR workflow
+
 ## Project
 
 3dPCB-paper: a research paper and spike CAD for a parametric 3D-printed
